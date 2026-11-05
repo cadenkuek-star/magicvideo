@@ -11,6 +11,7 @@ Your raw files are never modified.
 - Design and reasoning: [docs/PROPOSAL.md](docs/PROPOSAL.md)
 - Contract the code follows: [docs/IMPLEMENTATION_BRIEF.md](docs/IMPLEMENTATION_BRIEF.md)
 - What still needs checking on real footage: [docs/VERIFICATION.md](docs/VERIFICATION.md)
+- Setting it up on Windows with Antigravity: [docs/RELAY_ANTIGRAVITY.md](docs/RELAY_ANTIGRAVITY.md)
 
 ## What it does differently from v2
 

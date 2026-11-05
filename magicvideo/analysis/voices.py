@@ -1,6 +1,7 @@
 """Voice windows, speaker embeddings (speechbrain ECAPA, optional) and partner labelling."""
 from __future__ import annotations
 
+import os
 import wave
 from pathlib import Path
 
@@ -62,8 +63,17 @@ def _encoder(policy: Policy):
     dev = policy("compute.device")
     if dev == "auto":
         dev = "cuda" if ffmpeg.gpu_available() else "cpu"
+    kwargs = {"savedir": str(Path.home() / ".cache" / "magicvideo" / "spkrec-ecapa-voxceleb")}
+    if os.name == "nt":
+        # speechbrain links model files with symlinks by default; Windows refuses them without
+        # Developer Mode ("symbolic link privilege not held"), so copy instead.
+        try:
+            from speechbrain.utils.fetching import LocalStrategy  # type: ignore
+            kwargs["local_strategy"] = LocalStrategy.COPY
+        except ImportError:
+            pass
     _ENCODER = EncoderClassifier.from_hparams(source="speechbrain/spkrec-ecapa-voxceleb",
-                                              run_opts={"device": dev})
+                                              run_opts={"device": dev}, **kwargs)
     return _ENCODER
 
 
