@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+# never commit footage or work folders
+*.mp4
+*.MP4
+*.mov
+*.MOV
+*.insv
+*.lrv
+*.wav
+work/
+people/
