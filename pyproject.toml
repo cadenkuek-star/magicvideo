@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "magicvideo"
+version = "0.1.0"
+description = "Couple travel film pipeline: deterministic planning from analysed footage, one policy file, computed QC."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "pyyaml>=6.0",
+  "opencv-python-headless>=4.8",
+  "opentimelineio>=0.16",
+]
+
+[project.optional-dependencies]
+asr = ["faster-whisper>=1.0"]
+voice = ["speechbrain>=1.0", "torch>=2.1", "torchaudio>=2.1"]
+faces = ["insightface>=0.7.3", "onnxruntime>=1.16"]
+faces-gpu = ["insightface>=0.7.3", "onnxruntime-gpu>=1.16"]
+tags = ["anthropic>=0.40"]
+geo = ["reverse_geocoder>=1.5"]
+all = ["magicvideo[asr,voice,faces,tags,geo]"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+magicvideo = "magicvideo.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["magicvideo*"]
+
+[tool.setuptools.package-data]
+magicvideo = ["default_policy.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,164 @@
+# magicvideo policy: every threshold lives here (see docs/IMPLEMENTATION_BRIEF.md).
+# `magicvideo init` copies this file into the trip folder; edit that copy.
+version: 3
+
+trip:
+  timezone: null                 # e.g. "Asia/Seoul"; used for creation_time (UTC) conversion
+
+compute:
+  device: auto                   # auto | cuda | cpu
+  asr_model: large-v3            # CPU fallback: consider "medium" for speed
+  asr_compute_type: auto         # auto -> float16 on GPU, int8 on CPU
+
+cloud:                           # scene tagging only; nothing else ever leaves the machine
+  scene_tagging: true
+  provider: anthropic
+  model: null                    # null = claude-opus-5-5; set e.g. claude-haiku-5-5 to cut tagging cost
+  effort: low                    # tagging is simple classification
+  api_key_env: ANTHROPIC_API_KEY
+  max_frame_px: 512
+  frames_per_request: 9          # sent as one labelled 3x3 grid
+  frame_interval_s: 3.0
+
+analysis:
+  steps: [quality, asr, voices, faces, tags]
+
+quality:
+  sample_fps: 10
+  proxy_px: 320
+  jitter_smooth_s: 0.5
+  jitter: {medium: 0.006, high: 0.015}   # fraction of frame diagonal; calibrate per camera
+  blur_min: 0.15                 # normalized sharpness (0..1)
+  white_fraction_max: 0.90       # share of near-white pixels that marks a whiteout
+  black_luma_max: 0.06           # mean luma (0..1) below this = black / lens covered
+  stabilize_max_zoom: 0.06
+
+identity:
+  unknown_speech_is_couple: true # without voice refs, treat speech as couple speech (safe default)
+  face:
+    backend: insightface         # insightface | yunet
+    sample_fps: 2
+    frame_px: 1280
+    min_similarity: 0.40
+    margin: 0.06
+    track_max_gap_s: 1.0
+    yunet_detector: null         # path to face_detection_yunet_2023mar.onnx (backend yunet)
+    sface_recognizer: null       # path to face_recognition_sface_2021dec.onnx (backend yunet)
+  voice:
+    backend: speechbrain
+    min_similarity: 0.55
+    margin: 0.05
+  silent_solo_shot_max_s: {PARTNER_A: 4.0, PARTNER_B: 0.0}   # 0 = drop
+
+voice:
+  window_gap_s: 0.5
+  window_max_s: 3.0
+  min_window_s: 0.8
+
+enrollment:
+  cluster_similarity: {face: 0.45, voice: 0.60}
+  max_candidates: 8
+  samples_per_candidate: {face: 12, voice: 8}
+  min_kept_per_partner: {face: 4, voice: 3}
+
+moments:
+  conversation:
+    join_gap_s: 6.0
+    pre_roll_s: 0.7
+    post_roll_s: 1.5
+    keep_pause_up_to_s: 2.5
+    shorten_pause_to_s: 1.2
+    split_pause_over_s: 8.0
+    keep_other_speakers_inside: true
+  action:
+    tags: [taste, toast, cheers, reveal, game, dance, purchase]
+    partner_window_s: 2.0
+    pre_s: 1.5
+    post_s: 3.0
+
+coverage:
+  shot_min_s: 3.0
+  shot_max_s: 6.0
+  step_s: 1.5
+  margin_s: 0.5
+  mmr_lambda: 0.7
+  budget_overshoot_max: 0.15       # never exceed an event's coverage budget by more than this
+  max_similarity: 0.92
+
+third_party:
+  excerpt_max_s: 8.0
+  reaction_window_s: 3.0
+
+budgets_s:                       # [min, max] coverage seconds per event; couple moments never count here
+  meal: [20, 40]
+  landmark: [20, 45]
+  transit: [15, 40]
+  street: [15, 30]
+  hotel: [10, 25]
+  performance: [10, 25]
+  general: [15, 35]
+  third_party_per_event: 25
+
+film_limits:
+  transit_share_max: 0.10
+  third_party_share_max: 0.05
+  max_gap_without_partner_s: 90
+  target_runtime_min: null       # null = runtime comes from the footage
+
+events:
+  gap_min: 20
+
+assembly:
+  merge_gap_s: 0.5
+  cover_len_s: 2.0
+  defect_min_s: 0.5
+
+output:
+  orientation: auto              # auto | landscape | portrait
+  portrait_threshold: 0.60
+  fps: dominant_family           # dominant_family | 25 | 30 | 30000/1001
+  landscape_size: [1920, 1080]
+  portrait_size: [1080, 1920]
+  chapters: true
+  video: {codec: libx264, crf: 18, preset: slow, profile: high}
+
+reframe:
+  min_crop_short_side: 1600
+  bg_blur_sigma: 30
+  bg_brightness: -0.18
+
+render:
+  workers: auto                  # parallel piece renders; auto = min(4, cpus/2)
+  intermediate_crf: 12
+  audio_fade_ms: 8
+  keep_intermediates: false
+
+audio:
+  sample_rate: 48000
+  integrated_lufs: -16.0
+  integrated_tolerance: 1.0
+  true_peak_dbtp: -1.5
+  aac_bitrate: 192k
+  dialogue_match_max_db: 3.0
+
+color:
+  luts: {}                       # e.g. {"d-log-m": "C:/Travel/luts/DJI_DLogM_to_Rec709.cube"}
+
+insta360:
+  stitcher: auto                 # auto | studio_export | media_sdk
+  allow_unstitched_render: false # render .insv dual fisheye directly (visible seams)
+  fisheye_fov_deg: 200           # per-lens FOV for dual-fisheye conversion; verify on an X6 sample
+  analysis_views: 6
+  analysis_view_fov_deg: 100
+  min_hfov_deg: {below_8k: 90, at_least_8k: 80}
+  max_yaw_speed_dps: 30
+  min_shot_hold_s: 2.5
+  both_partners_max_spread_deg: 110
+  pitch_limit_deg: 25
+
+qc:
+  couple_word_retention_min: 0.98   # planned: partner words kept in the timeline
+  rendered_word_match_min: 0.90     # independent re-transcription of the master (ASR noise allowed)
+  unhidden_conversation_jump_cuts_max: 0
+  av_drift_ms_max: 21
+  event_over_budget_max: 0.20
