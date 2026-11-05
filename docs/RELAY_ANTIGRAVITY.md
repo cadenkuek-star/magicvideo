@@ -42,27 +42,54 @@ C:\Travel\people\              shared face/voice enrollment (reused for every tr
 
 Existing v2 folders (`C:\Travel\output\...`, `C:\Travel\Couple_References\...`) stay exactly as they are.
 
-## 2. System tools
+## 2. System tools (check first; install only what is missing)
 
-Run these in PowerShell (a normal user window is fine; `winget` asks for elevation when it needs it):
+Use PowerShell (a normal user window is fine; `winget` asks for elevation when it needs it).
 
-```powershell
-winget install --id Git.Git -e
-winget install --id Python.Python.3.11 -e
-winget install --id Gyan.FFmpeg -e
-```
-
-`Gyan.FFmpeg` is the **full** build, which magicvideo needs for vidstab and v360. Don't use the "essentials" build. Close PowerShell and open a new one so the PATH updates.
-
-**CHECK**
+### 2a. Git and ffmpeg
 
 ```powershell
 git --version
-py -3.11 --version
 ffmpeg -hide_banner -filters | Select-String -Pattern " v360 | vidstabdetect | loudnorm | alimiter | sendcmd "
 ```
 
-Expected: a git version, Python 3.11.x, and all five filter names listed. If `ffmpeg` is a different build earlier on PATH (`where.exe ffmpeg`), fix the PATH order.
+- If `git` is missing: `winget install --id Git.Git -e`
+- If `ffmpeg` is missing, or any of the five filters is not listed: `winget install --id Gyan.FFmpeg -e`. That is the **full** build, which magicvideo needs for vidstab and v360; the "essentials" build won't do. If an older ffmpeg comes first on PATH (`where.exe ffmpeg`), fix the PATH order.
+
+### 2b. Python: use what is installed when it works
+
+magicvideo itself runs on Python 3.10 or newer. What decides the version is whether **every dependency has a ready-made Windows wheel** for it; otherwise pip tries to compile C++/Rust code and fails.
+
+Status checked on PyPI on 2026-11-05:
+
+| Python | Usable? | Why |
+|---|---|---|
+| 3.15 | No | no Windows wheels yet for pyyaml, opentimelineio, onnxruntime, torchaudio, pydantic-core |
+| 3.14 | No | no Windows wheels yet for opentimelineio (the Resolve timeline export) and pydantic-core (used by the Anthropic SDK) |
+| **3.13** | **Yes, recommended** | newest version with every wheel; security fixes until Oct 2029 |
+| 3.12 | Yes | |
+| 3.10, 3.11 | Yes | slightly older numpy/scipy; 3.11 security fixes end Oct 2027 |
+
+Don't take the table on trust; it changes as packages release. Run this check **on the Windows PC itself**: pip only evaluates Windows-specific requirements correctly when it runs on Windows. It asks pip to resolve every dependency using wheels only, installs nothing, and prints the newest installed version that passes:
+
+```powershell
+py -0p
+$deps = "numpy pyyaml opencv-python opentimelineio torch torchaudio faster-whisper speechbrain insightface onnxruntime anthropic".Split(" ")
+$PY = $null
+foreach ($v in "3.15","3.14","3.13","3.12","3.11","3.10") {
+  py -$v -c "pass" 2>$null; if ($LASTEXITCODE -ne 0) { continue }
+  py -$v -m pip install --dry-run --quiet --only-binary=:all: @deps 2>$null
+  if ($LASTEXITCODE -eq 0) { $PY = $v; "USE Python $v"; break } else { "skip Python $v (a dependency has no Windows wheel yet)" }
+}
+```
+
+Then:
+
+- If any version passed, **use `$PY`**, the newest installed version that passed. Don't install another Python. An installed 3.10 or 3.11 is fine; moving to 3.13 later is optional (3.11 stops getting security fixes in Oct 2027).
+- Only if **nothing** passed: run `winget install --id Python.Python.3.13 -e`, open a new terminal and run the check again. It should print `USE Python 3.13`.
+- **Never uninstall other Python versions.** They live side by side under the `py` launcher.
+
+**CHECK:** the check printed `USE Python <version>`, and `$PY` holds it. Report the full output, including `py -0p`. Every later step uses `py -$PY`; if you open a new terminal, set `$PY` again (for example `$PY = "3.13"`).
 
 ## 3. Get the code
 
@@ -83,7 +110,7 @@ The repo is public, so cloning needs no login. Pushing (only for step 0.4 fixes)
 
 ```powershell
 cd C:\Travel\magicvideo
-py -3.11 -m venv .venv
+py -$PY -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 setx PYTHONUTF8 1
@@ -116,7 +143,14 @@ nvidia-smi
    ```powershell
    pip install -e ".[asr,voice,tags,geo,faces-gpu]"
    ```
-3. faster-whisper on GPU also needs the CUDA 12 cuBLAS and cuDNN 9 libraries. If step 8 fails with a missing `cublas64_12.dll` or `cudnn*.dll`, follow the GPU section of the faster-whisper README for Windows. If that can't be resolved, set `compute.device: cpu` in the trip's `policy.yaml` and tell the owner. This is an allowed environment change.
+3. faster-whisper and insightface also pull in the CPU build of `onnxruntime`, which can shadow the GPU build. Keep only the GPU build:
+   ```powershell
+   pip uninstall -y onnxruntime
+   pip install --force-reinstall --no-deps onnxruntime-gpu
+   python -c "import onnxruntime as o; print(o.get_available_providers())"
+   ```
+   The list must include `CUDAExecutionProvider`.
+4. faster-whisper on GPU also needs the CUDA 12 cuBLAS and cuDNN 9 libraries. If step 8 fails with a missing `cublas64_12.dll` or `cudnn*.dll`, follow the GPU section of the faster-whisper README for Windows. If that can't be resolved, set `compute.device: cpu` in the trip's `policy.yaml` and tell the owner. This is an allowed environment change.
 
 **Without a GPU:**
 
@@ -125,13 +159,19 @@ pip install torch torchaudio
 pip install -e ".[asr,voice,tags,geo,faces]"
 ```
 
-**If `insightface` fails to build** (error mentions "Microsoft Visual C++ 14.0 or greater is required"):
+**torch and torchaudio must be a matching pair.** Check:
 
-1. Install the build tools, then open a new terminal, activate the venv and retry the `pip install` line:
-   ```powershell
-   winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-   ```
-2. If it still fails, use the OpenCV face backend instead. It reuses the v2 model files. Find them:
+```powershell
+python -c "import torch, torchaudio; print(torch.__version__, torchaudio.__version__)"
+```
+
+If that import fails: the newest torchaudio release (2.11.1) has no Windows wheels, so pip may have mixed versions. Pin both to the newest pair that has Windows wheels, then check again. With CUDA, use the PyTorch index URL from pytorch.org with the same two pins.
+
+```powershell
+pip install "torch==2.11.*" "torchaudio==2.11.*"
+```
+
+insightface 2.1 is pure Python, so no C++ compiler is needed. **If `insightface` still fails to install or import,** use the OpenCV face backend instead. It reuses the v2 model files. Find them:
    ```powershell
    Get-ChildItem C:\Travel -Recurse -Include face_detection_yunet_2023mar.onnx,face_recognition_sface_2021dec.onnx -ErrorAction SilentlyContinue | Select-Object FullName
    ```
@@ -272,7 +312,8 @@ magicvideo qc C:\Travel\work\<Trip>
 
 ```
 ## Environment
-- Windows version / GPU (nvidia-smi first lines) / Python / ffmpeg version
+- Windows version / GPU (nvidia-smi first lines) / ffmpeg version
+- Python: `py -0p` output, step 2b check output, version used (`$PY`)
 - Branch + commit: <git rev-parse --short HEAD>
 
 ## Step 4: pytest on Windows
@@ -307,7 +348,10 @@ Send the report and samples back to the owner, who will pass them to Claude for 
 | `Activate.ps1 cannot be loaded` | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then retry |
 | `magicvideo` not recognized | The venv isn't active. Activate it, or call `C:\Travel\magicvideo\.venv\Scripts\magicvideo.exe` |
 | doctor shows `vidstabdetect: no` or `v360: no` | Wrong ffmpeg build or PATH order. Install `Gyan.FFmpeg` (full); check `where.exe ffmpeg` |
-| insightface: "Microsoft Visual C++ 14.0 or greater is required" | Build Tools (step 5), or the YuNet fallback |
+| pip tries to compile something ("Microsoft Visual C++ 14.0 or greater is required", CMake or Rust errors) | The Python version is too new for one dependency's Windows wheels. Re-run the step 2b check and use the version it picks |
+| `import torch, torchaudio` fails | Pin a matching pair (step 5) |
+| GPU machine, but `onnxruntime` has no `CUDAExecutionProvider` | Uninstall `onnxruntime`, reinstall `onnxruntime-gpu` (step 5) |
+| insightface fails to install or import | YuNet fallback (step 5) |
 | speechbrain: "symbolic link privilege not held" | The code already copies files on Windows. If it still appears, turn on Windows Developer Mode and report it |
 | ASR on GPU: missing `cublas64_12.dll` / `cudnn` | Step 5 GPU note, or `compute.device: cpu` |
 | `UnicodeEncodeError` | `$env:PYTHONUTF8 = "1"` (and `setx PYTHONUTF8 1`) |

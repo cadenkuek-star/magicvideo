@@ -11,15 +11,16 @@ requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.24",
   "pyyaml>=6.0",
-  "opencv-python-headless>=4.8",
+  "opencv-python-headless>=4.8; platform_system != 'Windows'",
+  "opencv-python>=4.8; platform_system == 'Windows'",  # same package insightface pulls in: avoids two cv2 builds
   "opentimelineio>=0.16",
 ]
 
 [project.optional-dependencies]
 asr = ["faster-whisper>=1.0"]
 voice = ["speechbrain>=1.0", "torch>=2.1", "torchaudio>=2.1"]
-faces = ["insightface>=0.7.3", "onnxruntime>=1.16"]
-faces-gpu = ["insightface>=0.7.3", "onnxruntime-gpu>=1.16"]
+faces = ["insightface>=2.1", "onnxruntime>=1.16"]
+faces-gpu = ["insightface>=2.1", "onnxruntime-gpu>=1.16"]
 tags = ["anthropic>=0.40"]
 geo = ["reverse_geocoder>=1.5"]
 all = ["magicvideo[asr,voice,faces,tags,geo]"]

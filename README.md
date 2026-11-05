@@ -23,7 +23,7 @@ Your raw files are never modified.
 
 ## Install (Windows)
 
-1. Install Python 3.11+ and a *full* ffmpeg build (for example from gyan.dev), with `ffmpeg` on PATH. You need the full build for vidstab and v360.
+1. Use Python 3.10–3.13 (whatever you already have in that range is fine; 3.13 recommended) and a *full* ffmpeg build (for example from gyan.dev) on PATH. You need the full build for vidstab and v360. Python 3.14+ works as soon as every dependency ships Windows wheels for it; [docs/RELAY_ANTIGRAVITY.md](docs/RELAY_ANTIGRAVITY.md) step 2 has the check.
 2. From this folder, install the package:
    ```
    pip install -e ".[all]"
