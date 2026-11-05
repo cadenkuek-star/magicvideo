@@ -93,6 +93,9 @@ def parse_qt_date(value: str) -> dt.datetime | None:
         return None
 
 
+_TZ_WARNED: set[str] = set()
+
+
 def to_local_naive(t: dt.datetime, timezone: str | None) -> dt.datetime:
     if t.tzinfo is None:
         return t
@@ -100,8 +103,11 @@ def to_local_naive(t: dt.datetime, timezone: str | None) -> dt.datetime:
         try:
             from zoneinfo import ZoneInfo
             return t.astimezone(ZoneInfo(timezone)).replace(tzinfo=None)
-        except Exception:
-            pass
+        except Exception as e:  # unknown name, or no tz database (Windows needs the `tzdata` package)
+            if timezone not in _TZ_WARNED:
+                _TZ_WARNED.add(timezone)
+                log.warning("timezone %r unavailable (%s); capture times keep the camera's own offset. "
+                            "On Windows run: pip install tzdata", timezone, e)
     # no trip timezone: keep the clock time the camera recorded with its own offset
     return t.replace(tzinfo=None)
 

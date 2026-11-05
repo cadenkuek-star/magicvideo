@@ -45,3 +45,40 @@ def test_qt_dates_and_timezone():
     assert to_local_naive(t, None) == dt.datetime(2026, 4, 19, 8, 36, 1)
     utc = parse_qt_date("2026-04-18T23:36:01Z")
     assert to_local_naive(utc, "Asia/Seoul") == dt.datetime(2026, 4, 19, 8, 36, 1)
+
+
+def test_filter_list_parsing_ffmpeg6_and_ffmpeg8():
+    from magicvideo.ffmpeg import parse_filter_list
+    ff6 = """Filters:
+  T.. = Timeline support
+ ... ebur128           A->N       EBU R128 scanner.
+ T.C alimiter          A->A       Audio lookahead limiter.
+ .SC v360              V->V       Convert 360 projection of video.
+ ... vidstabdetect     V->V       Extract relative transformations.
+ ... buffer            |->V       Buffer video frames."""
+    ff8 = """Filters:
+  T. = Timeline support
+ T. alimiter          A->A       Audio lookahead limiter.
+ .. loudnorm          A->A       EBU R128 loudness normalization
+ .. sendcmd           V->V       Send commands to filters.
+ .S v360              V->V       Convert 360 projection of video.
+ .. vidstabdetect     V->V       Extract relative transformations, pass 1 of 2."""
+    assert {"ebur128", "alimiter", "v360", "vidstabdetect", "buffer"} <= parse_filter_list(ff6)
+    assert {"alimiter", "loudnorm", "sendcmd", "v360", "vidstabdetect"} <= parse_filter_list(ff8)
+    assert "Timeline" not in parse_filter_list(ff8) and "=" not in parse_filter_list(ff8)
+
+
+def test_missing_timezone_database_warns_and_keeps_camera_time(monkeypatch, caplog):
+    import zoneinfo
+
+    from magicvideo import ingest
+
+    def boom(name):
+        raise zoneinfo.ZoneInfoNotFoundError(name)
+
+    monkeypatch.setattr(zoneinfo, "ZoneInfo", boom)
+    ingest._TZ_WARNED.discard("Asia/Seoul")
+    utc = parse_qt_date("2026-04-18T23:36:01Z")
+    with caplog.at_level("WARNING", logger="magicvideo"):
+        assert to_local_naive(utc, "Asia/Seoul") == dt.datetime(2026, 4, 18, 23, 36, 1)
+    assert "tzdata" in caplog.text

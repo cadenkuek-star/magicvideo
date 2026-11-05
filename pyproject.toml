@@ -14,6 +14,7 @@ dependencies = [
   "opencv-python-headless>=4.8; platform_system != 'Windows'",
   "opencv-python>=4.8; platform_system == 'Windows'",  # same package insightface pulls in: avoids two cv2 builds
   "opentimelineio>=0.16",
+  "tzdata; sys_platform == 'win32'",  # Windows has no IANA timezone database for zoneinfo
 ]
 
 [project.optional-dependencies]

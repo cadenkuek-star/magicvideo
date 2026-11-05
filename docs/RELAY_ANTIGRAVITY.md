@@ -128,7 +128,7 @@ magicvideo --version
 pytest
 ```
 
-Expected: `0.1.0`, then `35 passed`. This is the first time the code runs on Windows. If anything fails, **STOP** and report the full `pytest` output. Fix only per rule 0.4.
+Expected: `0.1.0`, then every test passes. The only skip allowed is `tests/test_tags.py`, which needs the `anthropic` package from step 5; after step 5, run `pytest` again and expect zero skips. This is the first time the code runs on Windows. If anything fails, **STOP** and report the full `pytest` output. Fix only per rule 0.4.
 
 ## 5. Model backends (GPU if available, otherwise CPU)
 

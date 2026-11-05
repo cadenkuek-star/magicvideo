@@ -46,16 +46,23 @@ def probe(path: Path) -> dict:
     return json.loads(proc.stdout or "{}")
 
 
+def parse_filter_list(text: str) -> frozenset[str]:
+    """Filter names from `ffmpeg -filters`. Rows look like ` TSC v360  V->V  ...` (ffmpeg <= 7)
+    or ` .S v360  V->V  ...` (ffmpeg 8: one flag column fewer), so match on shape, not width."""
+    names = set()
+    for line in text.splitlines():
+        parts = line.split()
+        if (len(parts) >= 3 and 1 <= len(parts[0]) <= 4 and set(parts[0]) <= set("TSCA.|")
+                and "->" in parts[2]):
+            names.add(parts[1])
+    return frozenset(names)
+
+
 @functools.lru_cache(maxsize=None)
 def filters() -> frozenset[str]:
     proc = subprocess.run([ffmpeg_bin(), "-hide_banner", "-filters"], capture_output=True, text=True,
                           encoding="utf-8", errors="replace")
-    names = set()
-    for line in proc.stdout.splitlines():
-        parts = line.split()
-        if len(parts) >= 3 and len(parts[0]) == 3 and set(parts[0]) <= set("TSC."):
-            names.add(parts[1])
-    return frozenset(names)
+    return parse_filter_list(proc.stdout)
 
 
 def has_filter(name: str) -> bool:
