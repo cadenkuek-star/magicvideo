@@ -62,3 +62,16 @@ def test_event_type_majority():
     assert T.event_type([["food", "table"], ["train"]]) == "meal"
     assert T.event_type([["car"], ["road"], ["food"]]) == "transit"
     assert T.event_type([[]]) == "general"
+
+
+def test_anthropic_without_key_is_backend_missing(monkeypatch):
+    import sys
+    import types
+
+    from magicvideo.analysis.asr import BackendMissing
+
+    monkeypatch.setitem(sys.modules, "anthropic", types.ModuleType("anthropic"))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    with pytest.raises(BackendMissing):
+        T.Tagger(policy(cloud={"provider": "anthropic"}))
