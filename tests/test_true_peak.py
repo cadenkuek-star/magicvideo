@@ -94,3 +94,16 @@ def test_encode_verified_gives_up(rig):
     mp2.setattr(A, "scan_true_peaks", lambda *a, **k: [])
     log = r2._encode_verified(wav2, None, tmp := out2.with_name("o2.mp4"))
     assert log["note"].startswith("gave up") and log["passes"] == 1 and tmp.exists()
+
+
+def test_encode_verified_check_off(rig):
+    r, wav, out, calls, mp = rig
+    r.policy = policy(audio={"post_encode_check": False})
+    spy = []
+    mp.setattr(A, "measure", lambda *a, **k: spy.append("measure"))
+    mp.setattr(A, "scan_true_peaks", lambda *a, **k: spy.append("scan"))
+    encodes = []
+    mp.setattr(Renderer, "_encode_master", lambda self, w, m, o: (encodes.append(1), Path(o).write_bytes(b"x")))
+    log = r._encode_verified(wav, None, out)
+    assert encodes == [1] and spy == [] and out.exists()
+    assert log["passes"] == 1 and log["note"] == "ok" and log["tp_first"] is None
