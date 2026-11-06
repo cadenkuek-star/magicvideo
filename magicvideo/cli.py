@@ -50,9 +50,11 @@ def cmd_enroll(a: argparse.Namespace) -> int:
     from . import enroll
     p = Project(Path(a.work))
     if a.finalize:
-        report = enroll.finalize(p)
+        report = enroll.finalize(p, merges=a.merge, allow_sparse=a.allow_sparse)
         for k, v in report.items():
-            print(f"{k}: {v}")
+            for line in (v if isinstance(v, list) else [v]):
+                print(f"{k}: {line}")
+        print(f"next: magicvideo plan \"{p.root}\"")
         return 0
     r = enroll.prepare(p)
     print(f"{r['faces']} face candidates, {r['voices']} voice candidates exported to {p.people_dir}")
@@ -114,6 +116,11 @@ def main(argv: list[str] | None = None) -> int:
     s.set_defaults(fn=cmd_analyze)
     s = sub.add_parser("enroll")
     s.add_argument("work"); s.add_argument("--finalize", action="store_true")
+    s.add_argument("--merge", action="append", default=[], metavar="SRC:DST",
+                   help="with --finalize: count the files of folder SRC under partner folder DST "
+                        "(for example voice_003:voice_001); repeatable")
+    s.add_argument("--allow-sparse", action="store_true",
+                   help="with --finalize: accept a partner with fewer files than the minimum (down to 1)")
     s.set_defaults(fn=cmd_enroll)
     s = sub.add_parser("plan")
     s.add_argument("work"); s.add_argument("--thumbs", action="store_true", help="add thumbnails to the storyboard")

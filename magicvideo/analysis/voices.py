@@ -109,10 +109,19 @@ def embed_windows(audio16k: Path, windows: list[dict], policy: Policy, batch: in
 
 
 def _partner_scores(emb: np.ndarray, refs: dict) -> tuple[np.ndarray, np.ndarray]:
-    """Per-window similarity to partner A and partner B (centroid scoring)."""
-    a = np.asarray(refs["voice_a"], np.float32)
-    b = np.asarray(refs["voice_b"], np.float32)
-    return emb @ a, emb @ b
+    """Per-window similarity to partner A and partner B.
+
+    The centroid score, or - when the references stored every enrolled embedding (`voice_x_all`) - the best
+    single-row score if that is higher.
+    """
+    out = []
+    for slot in ("a", "b"):
+        score = emb @ np.asarray(refs[f"voice_{slot}"], np.float32)
+        rows = refs.get(f"voice_{slot}_all")
+        if rows is not None and len(rows):
+            score = np.maximum(score, (emb @ np.asarray(rows, np.float32).T).max(axis=1))
+        out.append(score)
+    return out[0], out[1]
 
 
 def window_best_scores(emb: np.ndarray, refs: dict | None) -> np.ndarray:

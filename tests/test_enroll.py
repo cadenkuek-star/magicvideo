@@ -44,7 +44,7 @@ def _refs(p):
 
 def _three(extra_noise=0.0):
     return {
-        "voice_001": [(A_DIR, "c1"), (A_DIR, "c2"), (A_DIR, "c1")],
+        "voice_001": [(A_DIR, "c1"), (A_DIR, "c2"), (A_DIR, "c1"), (A_DIR, "c2")],
         "voice_002": [(B_DIR, "c1"), (B_DIR, "c2"), (B_DIR, "c3")],
         "voice_003": [(A_DIR + 0.1 * C_DIR, "c4"), (A_DIR + 0.1 * C_DIR, "c5")],
     }
@@ -65,10 +65,10 @@ def test_merge_folds_folder_into_partner(tmp_path):
     report = enroll.finalize(p, merges=["voice_003:voice_001"])
     assert "approved from" in report["voices"]
     refs = _refs(p)
-    assert refs["voice_a_all"].shape == (5, 4)             # voice_001 (3) + voice_003 (2) under partner a
+    assert refs["voice_a_all"].shape == (6, 4)             # voice_001 (4) + voice_003 (2) under partner a
     assert refs["voice_b_all"].shape == (3, 4)
-    assert int(refs["voice_a_count"]) == 5
-    assert len(list((p.people_dir / "voices" / "approved" / "partner_a").iterdir())) == 5
+    assert int(refs["voice_a_count"]) == 6
+    assert len(list((p.people_dir / "voices" / "approved" / "partner_a").iterdir())) == 6
     assert len(list((p.people_dir / "voices" / "approved" / "partner_b").iterdir())) == 3
 
 
@@ -77,7 +77,7 @@ def test_below_minimum_message_names_folder_and_flag(tmp_path):
     p = _project(tmp_path, _three())
     msg = enroll.finalize(p)["voices"]
     assert "need exactly 2 partners, found 3 after merges" in msg
-    assert "voice_001 (3 clips)" in msg and "voice_002 (3)" in msg
+    assert "voice_001 (4 clips)" in msg and "voice_002 (3)" in msg
     assert "voice_003 (2 — below minimum 3)" in msg
     assert "--merge voice_003:voice_002" in msg
     assert not (p.people_dir / "refs.npz").exists()

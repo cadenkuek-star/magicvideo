@@ -14,7 +14,7 @@ import yaml
 
 from . import ffmpeg, ingest
 from .analysis.views360 import analysis_view_filter, view_yaws
-from .project import Project
+from .project import Project, ProjectError
 from .util import read_json, safe_name, write_json
 
 REVIEW_TEXT = """\
@@ -27,7 +27,13 @@ This folder has candidate PEOPLE (faces/review/{trip}/person_NNN) and VOICES
    Inside your two folders, delete any image of somebody else. Keep at least {min_face} images each.
 2. Voices: play the clips in each voice_NNN folder. Delete every folder that is not one of you two.
    Inside your two folders, delete clips where somebody else is talking. Keep at least {min_voice} each.
-3. Do not rename or move anything. Then run:   magicvideo enroll "{work}" --finalize
+3. If one of you shows up under two folders (for example your voice behind the camera is in
+   voice_003 as well as voice_001), keep both folders and join them when you finish:
+   magicvideo enroll "{work}" --finalize --merge voice_003:voice_001
+   (the first folder is added to the second; you can repeat --merge).
+4. If one of you hardly speaks and has fewer clips than the minimum, add --allow-sparse. That
+   accepts even a single clip; recognition then leans on the assumption that speech is yours.
+5. Do not rename or move anything. Then run:   magicvideo enroll "{work}" --finalize
 """
 
 
@@ -229,47 +235,135 @@ def _face_crop(clip: dict, det: dict, pol) -> np.ndarray | None:
 
 
 # --------------------------------------------------------------------------- finalize
-def _surviving(review: Path, prefix: str, ext: str, minimum: int) -> list[tuple[str, list[str]]]:
-    out = []
+KINDS = (("face", "person_", ".jpg"), ("voice", "voice_", ".wav"))
+UNIT = {"face": "images", "voice": "clips"}
+NOUN = {"face": "face images", "voice": "voice clips"}
+
+
+def _surviving(review: Path, prefix: str, ext: str) -> dict[str, list[str]]:
+    """Every non-empty candidate folder (name -> sorted file names); the minimum is checked later."""
+    out: dict[str, list[str]] = {}
     if not review.exists():
         return out
     for d in sorted(p for p in review.iterdir() if p.is_dir() and p.name.startswith(prefix)):
         files = sorted(f.name for f in d.iterdir() if f.suffix.lower() == ext)
-        if len(files) >= minimum:
-            out.append((d.name, files))
+        if files:
+            out[d.name] = files
     return out
 
 
-def finalize(project: Project) -> dict:
+def _kind_of(name: str) -> str | None:
+    for kind, prefix, _ in KINDS:
+        if name.startswith(prefix):
+            return kind
+    return None
+
+
+def _parse_merges(project: Project, merges, paths: dict) -> list[tuple[str, str]]:
+    """Validate --merge SRC:DST pairs; raises ProjectError (nothing has been written yet)."""
+    pairs: list[tuple[str, str]] = []
+    for m in merges or []:
+        src, sep, dst = (m if isinstance(m, str) else f"{m[0]}:{m[1]}").partition(":")
+        if not sep or not src or not dst:
+            raise ProjectError(f"--merge needs SRC:DST (for example voice_003:voice_001), got {m!r}")
+        pairs.append((src, dst))
+    dsts = {d for _, d in pairs}
+    seen: set[str] = set()
+    for src, dst in pairs:
+        ks, kd = _kind_of(src), _kind_of(dst)
+        if ks is None or kd is None:
+            raise ProjectError(f"--merge {src}:{dst}: folder names must start with person_ or voice_")
+        if ks != kd:
+            raise ProjectError(f"--merge {src}:{dst}: a {ks} folder cannot be merged into a {kd} folder")
+        for name, kind in ((src, ks), (dst, kd)):
+            if not (paths[f"{kind}_review"] / name).is_dir():
+                raise ProjectError(f"--merge {src}:{dst}: folder {name} not found in {paths[f'{kind}_review']}")
+        if src in dsts:
+            raise ProjectError(f"--merge {src}:{dst}: {src} is also used as a destination; merges cannot be chained")
+        if src in seen:
+            raise ProjectError(f"--merge: {src} is merged more than once")
+        seen.add(src)
+    return pairs
+
+
+def _group_line(groups: dict[str, list], kind: str, minimum: int) -> str:
+    parts = []
+    for i, (name, items) in enumerate(groups.items()):
+        n = len(items)
+        label = f"{n} {UNIT[kind]}" if i == 0 else str(n)
+        if n < minimum:
+            label += f" \u2014 below minimum {minimum}"
+        parts.append(f"{name} ({label})")
+    return ", ".join(parts) if parts else "none"
+
+
+def finalize(project: Project, merges=(), allow_sparse: bool = False) -> dict:
     pol = project.policy
     paths = _people_paths(project)
+    pairs = _parse_merges(project, merges, paths)
     refs = dict(np.load(paths["refs"])) if paths["refs"].exists() else {}
     report: dict = {"faces": "unchanged", "voices": "unchanged"}
+    sparse_notes: list[str] = []
+    warnings: list[str] = []
 
-    for kind, prefix, ext in (("face", "person_", ".jpg"), ("voice", "voice_", ".wav")):
+    for kind, prefix, ext in KINDS:
         review = paths[f"{kind}_review"]
         manifest = read_json(review / "manifest.json", {})
         if not manifest:
             continue
-        keep = _surviving(review, prefix, ext, int(pol(f"enrollment.min_kept_per_partner.{kind}")))
-        if len(keep) != 2:
-            report[f"{kind}s"] = (f"need exactly 2 {prefix}NNN folders with enough files, found {len(keep)}: "
-                                  f"{[k for k, _ in keep]}")
+        minimum = 1 if allow_sparse else int(pol(f"enrollment.min_kept_per_partner.{kind}"))
+        groups: dict[str, list[tuple[str, str]]] = {n: [(n, f) for f in fs]
+                                                    for n, fs in _surviving(review, prefix, ext).items()}
+        for src, dst in pairs:
+            if _kind_of(src) != kind:
+                continue
+            moved = groups.pop(src, [])
+            groups.setdefault(dst, []).extend(moved)
+        groups = {n: items for n, items in sorted(groups.items()) if items}
+        if len(groups) != 2:
+            line = (f"need exactly 2 partners, found {len(groups)} after merges: "
+                    f"{_group_line(groups, kind, minimum)}.")
+            if len(groups) > 2:
+                by_size = sorted(groups.items(), key=lambda kv: (len(kv[1]), kv[0]))
+                line += (f" Delete folders that are not you two, or fold one into another: "
+                         f"--merge {by_size[0][0]}:{by_size[1][0]}")
+            report[f"{kind}s"] = line
+            continue
+        low = [(n, len(items)) for n, items in groups.items() if len(items) < minimum]
+        if low:
+            report[f"{kind}s"] = "; ".join(
+                f"{n} has {c} {UNIT[kind]}, below the minimum {minimum}: add more (or --merge another folder "
+                f"into it), or accept it with --allow-sparse" for n, c in low)
             continue
         approved = paths[f"{kind}_approved"]
-        for slot, (folder, files) in zip(("a", "b"), keep):
-            vecs = [np.asarray(manifest[f"{folder}/{f}"]["embedding"], np.float32)
-                    for f in files if f"{folder}/{f}" in manifest]
+        for slot, (dst_folder, items) in zip(("a", "b"), groups.items()):
+            keys = [(f"{fo}/{f}", fo, f) for fo, f in items if f"{fo}/{f}" in manifest]
+            vecs = [np.asarray(manifest[k]["embedding"], np.float32) for k, _, _ in keys]
             if not vecs:
                 continue
+            vecs = [v / (np.linalg.norm(v) + 1e-9) for v in vecs]
             c = np.mean(vecs, axis=0)
             refs[f"{kind}_{slot}"] = c / (np.linalg.norm(c) + 1e-9)
             refs[f"{kind}_{slot}_count"] = np.array(len(vecs))
+            refs[f"{kind}_{slot}_all"] = np.stack(vecs).astype(np.float32)
             dst = approved / f"partner_{slot}"
             dst.mkdir(parents=True, exist_ok=True)
-            for f in files:
-                shutil.copy2(review / folder / f, dst / f"{project.name}_{f}")
-        report[f"{kind}s"] = f"approved from {[k for k, _ in keep]}"
+            for fo, f in items:
+                name = f"{project.name}_{f}" if fo == dst_folder else f"{project.name}_{fo}_{f}"
+                shutil.copy2(review / fo / f, dst / name)
+            if len(items) < int(pol(f"enrollment.min_kept_per_partner.{kind}")):
+                sparse_notes.append(f"partner_{slot} has {len(items)} {NOUN[kind]} (minimum "
+                                    f"{int(pol(f'enrollment.min_kept_per_partner.{kind}'))}); "
+                                    f"recognition will rely on the couple prior")
+            clips_used = {manifest[k].get("clip_id") for k, _, _ in keys}
+            if len(clips_used) == 1:
+                warnings.append(f"partner_{slot}'s {kind} reference comes from 1 clip; "
+                                f"add clips from other cameras for better recognition")
+        report[f"{kind}s"] = f"approved from {list(groups)}"
+    if sparse_notes:
+        report["sparse"] = sparse_notes
+    if warnings:
+        report["warning"] = warnings
 
     if not refs:
         return report
@@ -277,7 +371,7 @@ def finalize(project: Project) -> dict:
     if swap is not None:
         report["voice_face_link"] = "swapped voices to match faces" if swap else "voices match faces"
         if swap:
-            refs["voice_a"], refs["voice_b"] = refs["voice_b"], refs["voice_a"]
+            _swap_voices(refs)
     else:
         report["voice_face_link"] = "not verified (needs both face and voice refs plus overlapping footage)"
     paths["base"].mkdir(parents=True, exist_ok=True)
@@ -286,6 +380,14 @@ def finalize(project: Project) -> dict:
                               else "PARTIAL", "trip": project.name, "voice_face_link": report["voice_face_link"],
                               "swap_voices": False})
     return report
+
+
+def _swap_voices(refs: dict) -> None:
+    """Swap partner a/b voice references (centroid, count and stored embeddings stay aligned)."""
+    for suffix in ("", "_count", "_all"):
+        a, b = f"voice_a{suffix}", f"voice_b{suffix}"
+        if a in refs and b in refs:
+            refs[a], refs[b] = refs[b], refs[a]
 
 
 def _voice_face_swap(project: Project, refs: dict) -> bool | None:
@@ -338,5 +440,5 @@ def load_refs(people_dir: Path) -> dict | None:
     e = Path(people_dir) / "enrollment.yaml"
     meta = yaml.safe_load(e.read_text(encoding="utf-8")) if e.exists() else {}
     if (meta or {}).get("swap_voices") and "voice_a" in refs and "voice_b" in refs:
-        refs["voice_a"], refs["voice_b"] = refs["voice_b"], refs["voice_a"]
+        _swap_voices(refs)
     return refs
