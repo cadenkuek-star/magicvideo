@@ -409,15 +409,23 @@ def finalize(project: Project, merges=(), allow_sparse: bool = False, assignment
 
     if not refs:
         return report
-    swap = None if assigned_done == {"face", "voice"} else _voice_face_swap(project, refs)
-    if assigned_done == {"face", "voice"}:
-        report["voice_face_link"] = "set by owner on the enrollment page"
-    elif swap is not None:
-        report["voice_face_link"] = "swapped voices to match faces" if swap else "voices match faces"
-        if swap:
-            _swap_voices(refs)
+    if assigned_done:   # the owner's explicit A/B choice is never overridden by the swap heuristic
+        swap = None
+        if assigned_done == {"face", "voice"}:
+            report["voice_face_link"] = "set by owner on the enrollment page"
+        else:
+            kind = next(iter(assigned_done))
+            other = "voice" if kind == "face" else "face"
+            report["voice_face_link"] = (f"set by owner for {kind}s on the enrollment page; "
+                                         f"{other}s kept from before (not cross-checked)")
     else:
-        report["voice_face_link"] = "not verified (needs both face and voice refs plus overlapping footage)"
+        swap = _voice_face_swap(project, refs)
+        if swap is not None:
+            report["voice_face_link"] = "swapped voices to match faces" if swap else "voices match faces"
+            if swap:
+                _swap_voices(refs)
+        else:
+            report["voice_face_link"] = "not verified (needs both face and voice refs plus overlapping footage)"
     paths["base"].mkdir(parents=True, exist_ok=True)
     np.savez(paths["refs"], **refs)
     meta = {"status": "APPROVED" if all(k in refs for k in ("face_a", "face_b", "voice_a", "voice_b"))
