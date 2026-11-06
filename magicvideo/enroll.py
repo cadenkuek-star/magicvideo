@@ -297,10 +297,37 @@ def _group_line(groups: dict[str, list], kind: str, minimum: int) -> str:
     return ", ".join(parts) if parts else "none"
 
 
-def finalize(project: Project, merges=(), allow_sparse: bool = False) -> dict:
+def _assigned_slots(review: Path, prefix: str, ext: str, kind: str, assign: dict, excluded: set[str],
+                    minimum: int):
+    """[(first folder, folders, items)] for slots a and b exactly as assigned, or (None, problem text)."""
+    slots, problems = [], []
+    for slot in ("a", "b"):
+        folders = list(assign.get(slot, []))
+        items = []
+        for fo in folders:
+            d = review / fo
+            if d.is_dir():
+                items += [(fo, f.name) for f in sorted(d.iterdir(), key=lambda f: f.name)
+                          if f.suffix.lower() == ext and f"{kind}/{fo}/{f.name}" not in excluded]
+        if not items:
+            problems.append(f"partner_{slot} has no {UNIT[kind]} assigned")
+        elif len(items) < minimum:
+            problems.append(f"partner_{slot} has {len(items)} {UNIT[kind]}, below the minimum {minimum}: add more "
+                            f"groups, or accept it with --allow-sparse")
+        slots.append((folders[0] if folders else None, folders, items))
+    if problems:
+        return None, "; ".join(problems)
+    return slots, None
+
+
+def finalize(project: Project, merges=(), allow_sparse: bool = False, assignment: dict | None = None,
+             excluded: set[str] | None = None, names: dict | None = None) -> dict:
     pol = project.policy
     paths = _people_paths(project)
     pairs = _parse_merges(project, merges, paths)
+    assignment = assignment or {}
+    excluded = excluded or set()
+    assigned_done: set[str] = set()
     refs = dict(np.load(paths["refs"])) if paths["refs"].exists() else {}
     report: dict = {"faces": "unchanged", "voices": "unchanged"}
     sparse_notes: list[str] = []
@@ -312,31 +339,38 @@ def finalize(project: Project, merges=(), allow_sparse: bool = False) -> dict:
         if not manifest:
             continue
         minimum = 1 if allow_sparse else int(pol(f"enrollment.min_kept_per_partner.{kind}"))
-        groups: dict[str, list[tuple[str, str]]] = {n: [(n, f) for f in fs]
-                                                    for n, fs in _surviving(review, prefix, ext).items()}
-        for src, dst in pairs:
-            if _kind_of(src) != kind:
+        if kind in assignment:
+            slots, problem = _assigned_slots(review, prefix, ext, kind, assignment[kind], excluded, minimum)
+            if problem:
+                report[f"{kind}s"] = problem
                 continue
-            moved = groups.pop(src, [])
-            groups.setdefault(dst, []).extend(moved)
-        groups = {n: items for n, items in sorted(groups.items()) if items}
-        if len(groups) != 2:
-            line = (f"need exactly 2 partners, found {len(groups)} after merges: "
-                    f"{_group_line(groups, kind, minimum)}.")
-            if len(groups) > 2:
-                by_size = sorted(groups.items(), key=lambda kv: (len(kv[1]), kv[0]))
-                line += (f" Delete folders that are not you two, or fold one into another: "
-                         f"--merge {by_size[0][0]}:{by_size[1][0]}")
-            report[f"{kind}s"] = line
-            continue
-        low = [(n, len(items)) for n, items in groups.items() if len(items) < minimum]
-        if low:
-            report[f"{kind}s"] = "; ".join(
-                f"{n} has {c} {UNIT[kind]}, below the minimum {minimum}: add more (or --merge another folder "
-                f"into it), or accept it with --allow-sparse" for n, c in low)
-            continue
+        else:
+            groups: dict[str, list[tuple[str, str]]] = {n: [(n, f) for f in fs]
+                                                        for n, fs in _surviving(review, prefix, ext).items()}
+            for src, dst in pairs:
+                if _kind_of(src) != kind:
+                    continue
+                moved = groups.pop(src, [])
+                groups.setdefault(dst, []).extend(moved)
+            groups = {n: items for n, items in sorted(groups.items()) if items}
+            if len(groups) != 2:
+                line = (f"need exactly 2 partners, found {len(groups)} after merges: "
+                        f"{_group_line(groups, kind, minimum)}.")
+                if len(groups) > 2:
+                    by_size = sorted(groups.items(), key=lambda kv: (len(kv[1]), kv[0]))
+                    line += (f" Delete folders that are not you two, or fold one into another: "
+                             f"--merge {by_size[0][0]}:{by_size[1][0]}")
+                report[f"{kind}s"] = line
+                continue
+            low = [(n, len(items)) for n, items in groups.items() if len(items) < minimum]
+            if low:
+                report[f"{kind}s"] = "; ".join(
+                    f"{n} has {c} {UNIT[kind]}, below the minimum {minimum}: add more (or --merge another folder "
+                    f"into it), or accept it with --allow-sparse" for n, c in low)
+                continue
+            slots = [(folder, [folder], items) for folder, items in groups.items()]
         approved = paths[f"{kind}_approved"]
-        for slot, (dst_folder, items) in zip(("a", "b"), groups.items()):
+        for slot, (dst_folder, _folders, items) in zip(("a", "b"), slots):
             keys = [(f"{fo}/{f}", fo, f) for fo, f in items if f"{fo}/{f}" in manifest]
             vecs = [np.asarray(manifest[k]["embedding"], np.float32) for k, _, _ in keys]
             if not vecs:
@@ -359,7 +393,9 @@ def finalize(project: Project, merges=(), allow_sparse: bool = False) -> dict:
             if len(clips_used) == 1:
                 warnings.append(f"partner_{slot}'s {kind} reference comes from 1 clip; "
                                 f"add clips from other cameras for better recognition")
-        report[f"{kind}s"] = f"approved from {list(groups)}"
+        report[f"{kind}s"] = f"approved from {[f for _, fl, _ in slots for f in fl]}"
+        if kind in assignment:
+            assigned_done.add(kind)
     if sparse_notes:
         report["sparse"] = sparse_notes
     if warnings:
@@ -367,8 +403,10 @@ def finalize(project: Project, merges=(), allow_sparse: bool = False) -> dict:
 
     if not refs:
         return report
-    swap = _voice_face_swap(project, refs)
-    if swap is not None:
+    swap = None if assigned_done == {"face", "voice"} else _voice_face_swap(project, refs)
+    if assigned_done == {"face", "voice"}:
+        report["voice_face_link"] = "set by owner on the enrollment page"
+    elif swap is not None:
         report["voice_face_link"] = "swapped voices to match faces" if swap else "voices match faces"
         if swap:
             _swap_voices(refs)
@@ -376,9 +414,12 @@ def finalize(project: Project, merges=(), allow_sparse: bool = False) -> dict:
         report["voice_face_link"] = "not verified (needs both face and voice refs plus overlapping footage)"
     paths["base"].mkdir(parents=True, exist_ok=True)
     np.savez(paths["refs"], **refs)
-    _write_enrollment(paths, {"status": "APPROVED" if all(k in refs for k in ("face_a", "face_b", "voice_a", "voice_b"))
-                              else "PARTIAL", "trip": project.name, "voice_face_link": report["voice_face_link"],
-                              "swap_voices": False})
+    meta = {"status": "APPROVED" if all(k in refs for k in ("face_a", "face_b", "voice_a", "voice_b"))
+            else "PARTIAL", "trip": project.name, "voice_face_link": report["voice_face_link"],
+            "swap_voices": False}
+    if names:
+        meta["names"] = {k: str(names.get(k, "")).strip()[:40] for k in ("a", "b")}
+    _write_enrollment(paths, meta)
     return report
 
 
