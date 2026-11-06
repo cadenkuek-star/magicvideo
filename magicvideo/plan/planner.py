@@ -77,6 +77,8 @@ def edge_speech_warnings(selected: list, cds: dict, policy) -> list[str]:
         if m.kind != "conversation":
             continue
         cd = cds[m.clip_id]
+        if cd.clip.get("capture_source") == "filename" and not policy("moments.edge_speech.camera_originals"):
+            continue
         idx = cd.words_in(m.t0, m.t1)
         if not idx:
             continue
