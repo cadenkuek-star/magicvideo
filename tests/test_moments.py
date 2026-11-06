@@ -75,3 +75,59 @@ def test_third_party_speech_is_separate_from_couple():
     assert "third_party" in kinds and "conversation" in kinds
     tp = [m for m in ms if m.kind == "third_party"][0]
     assert tp.cls == "third_party"
+
+
+# ---------------------------------------------------------------------------- W4: couple prior
+def _win(t0, t1):
+    return {"t0": t0, "t1": t1, "w0": 0, "w1": 1}
+
+
+def test_couple_prior_relabels_unmatched_voice():
+    from magicvideo.plan.data import apply_couple_prior
+
+    out = apply_couple_prior([_win(1, 2), _win(3, 4)], [O, A], [], policy())
+    assert out == ["COUPLE", A]
+
+
+def test_stranger_on_screen_keeps_third_party():
+    from magicvideo.plan.data import apply_couple_prior
+
+    p = policy()  # pad_s 1.0
+    w = [_win(10, 12)]
+    assert apply_couple_prior(w, [O], [11.0], p) == [O]       # inside the window
+    assert apply_couple_prior(w, [O], [13.0], p) == [O]       # exactly t1 + pad
+    assert apply_couple_prior(w, [O], [9.0], p) == [O]        # exactly t0 - pad
+    assert apply_couple_prior(w, [O], [13.01], p) == ["COUPLE"]   # just outside t1 + pad
+    assert apply_couple_prior(w, [O], [8.99], p) == ["COUPLE"]    # just outside t0 - pad
+    # a stranger near one window does not touch a distant window
+    two = [_win(10, 12), _win(40, 42)]
+    assert apply_couple_prior(two, [O, O], [13.0], p) == [O, "COUPLE"]
+
+
+def test_couple_prior_off_keeps_old_labels():
+    from magicvideo.plan.data import apply_couple_prior
+
+    p = policy(identity={"couple_prior": False})
+    assert apply_couple_prior([_win(1, 2), _win(3, 4)], [O, A], [], p) == [O, A]
+
+
+def test_couple_turns_make_a_conversation():
+    cd = clipdata(clip(duration=60), [(1.0, 2.0, "hello"), (2.5, 3.5, "there")], speakers=["COUPLE", "COUPLE"])
+    convs = conversations(cd, policy())
+    assert len(convs) == 1
+    assert convs[0].kind == "conversation" and convs[0].cls == "couple"
+    assert convs[0].partner_words > 0
+
+
+def test_stranger_times_thresholds():
+    from magicvideo.analysis.faces import stranger_times
+
+    fa = np.array([1.0, 0, 0, 0], np.float32)
+    fb = np.array([0, 1.0, 0, 0], np.float32)
+    far = np.array([0, 0, 1.0, 0], np.float32)
+    near = np.array([0.25, 0, np.sqrt(1 - 0.0625), 0], np.float32)   # 0.25 to face_a: not a stranger
+    dets = [{"t": 1.0, "q": 0.6}, {"t": 2.0, "q": 0.3}, {"t": 3.0, "q": 0.6}]
+    emb = np.stack([far, far, near])
+    assert stranger_times(dets, emb, {"face_a": fa, "face_b": fb}, policy()) == [1.0]
+    assert stranger_times(dets, emb, None, policy()) == []
+    assert stranger_times([], np.zeros((0, 4), np.float32), {"face_a": fa, "face_b": fb}, policy()) == []
