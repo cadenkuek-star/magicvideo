@@ -1,6 +1,7 @@
 import datetime as dt
 
 import numpy as np
+import pytest
 
 from magicvideo.ingest import detect_camera, filename_time, insta360_key, looks_dual_fisheye, parse_qt_date, to_local_naive
 
@@ -82,3 +83,13 @@ def test_missing_timezone_database_warns_and_keeps_camera_time(monkeypatch, capl
     with caplog.at_level("WARNING", logger="magicvideo"):
         assert to_local_naive(utc, "Asia/Seoul") == dt.datetime(2026, 4, 18, 23, 36, 1)
     assert "tzdata" in caplog.text
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("026_DJI_20260420125548_0027_D.MP4", dt.datetime(2026, 4, 20, 12, 55, 48)),
+    ("DJI_20260420125548_0027_D.MP4", dt.datetime(2026, 4, 20, 12, 55, 48)),
+    ("026_VID_20260919_110940_00_004.insv", dt.datetime(2026, 9, 19, 11, 9, 40)),
+    ("XDJI_20260420125548_0027_D.MP4", None),
+])
+def test_filename_time_with_prefix(name, expected):
+    assert filename_time(name) == expected
