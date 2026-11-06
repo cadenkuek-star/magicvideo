@@ -139,8 +139,9 @@ def load_clip(project, clip: dict, refs: dict | None, policy: Policy) -> ClipDat
     labels = apply_couple_prior(windows, raw, stranger_ts, policy)
     best = window_best_scores(emb, refs) if matched else np.zeros(len(windows), np.float32)
     pad = float(policy("identity.stranger_face.pad_s"))
+    has_voice = bool(refs) and refs.get("voice_a") is not None and refs.get("voice_b") is not None
     cd.window_evidence = [{"t0": round(float(w["t0"]), 3), "t1": round(float(w["t1"]), 3), "raw": r, "label": lab,
-                           "voice_best": round(float(v), 3), "stranger": _stranger_near(w, stranger_ts, pad)}
+                           "voice_best": round(float(v), 3) if has_voice else None, "stranger": _stranger_near(w, stranger_ts, pad)}
                           for w, r, lab, v in zip(windows, raw, labels, best)]
     cd.turns = build_turns(cd.words, windows, labels, float(policy("moments.conversation.join_gap_s")))
     qj = read_json(adir / "quality.json")

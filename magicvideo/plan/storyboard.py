@@ -98,18 +98,15 @@ def _thumb(project, clip: dict, m: dict, out_dir: Path) -> str | None:
 
 
 def _identity_line(project, ident: dict) -> str:
-    needs = float(project.policy("identity.voice.min_similarity"))
-    line = (f"voice match {ident['voice_best']:.2f} (needs {needs:.2f}) · "
-            f"stranger on screen: {'yes' if ident['stranger_on_screen'] else 'no'}")
+    parts = []
+    if ident.get("voice_best") is not None:
+        needs = float(project.policy("identity.voice.min_similarity"))
+        parts.append(f"voice match {ident['voice_best']:.2f} (needs {needs:.2f})")
+    parts.append(f"stranger on screen: {'yes' if ident['stranger_on_screen'] else 'no'}")
     n = int(ident.get("assumed_couple", 0))
     if n:
-        line += f" · treated as you two ({n} window{'s' if n != 1 else ''})"
-    return line
-
-
-def _js_json(obj) -> str:
-    """JSON that is safe inside an HTML <script> element."""
-    return json.dumps(obj, sort_keys=True, ensure_ascii=False).replace("</", "<\\/").replace("<!--", "<\\!--")
+        parts.append(f"treated as you two ({n} window{'s' if n != 1 else ''})")
+    return " \u00b7 ".join(parts)
 
 
 def write_storyboard(project, plan: dict, timeline: dict, path: Path, thumbs: bool = False) -> Path:

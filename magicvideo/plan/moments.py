@@ -57,9 +57,13 @@ def _identity(cd: ClipData, t0: float, t1: float) -> dict:
     ev = [w for w in cd.window_evidence if w["t1"] > t0 and w["t0"] < t1]
     if not ev:
         return {}
-    return {"voice_best": round(max(w["voice_best"] for w in ev), 3),
-            "stranger_on_screen": any(w["stranger"] for w in ev),
-            "assumed_couple": sum(1 for w in ev if w["raw"] == OTHER and w["label"] == COUPLE)}
+    out = {}
+    scores = [w["voice_best"] for w in ev if w["voice_best"] is not None]
+    if scores:
+        out["voice_best"] = round(max(scores), 3)
+    out["stranger_on_screen"] = any(w["stranger"] for w in ev)
+    out["assumed_couple"] = sum(1 for w in ev if w["raw"] == OTHER and w["label"] == COUPLE)
+    return out
 
 
 def conversations(cd: ClipData, policy: Policy) -> list[Moment]:
