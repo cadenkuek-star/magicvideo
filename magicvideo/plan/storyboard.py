@@ -109,6 +109,11 @@ def _identity_line(project, ident: dict) -> str:
     return " \u00b7 ".join(parts)
 
 
+def _js_json(obj) -> str:
+    """JSON that is safe inside an HTML <script> element."""
+    return json.dumps(obj, sort_keys=True, ensure_ascii=False).replace("</", "<\\/").replace("<!--", "<\\!--")
+
+
 def write_storyboard(project, plan: dict, timeline: dict, path: Path, thumbs: bool = False) -> Path:
     v = version_of(path)
     tag = vtag(v) if v else ""
