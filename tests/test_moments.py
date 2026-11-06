@@ -141,3 +141,22 @@ def test_identity_omits_voice_without_refs():
     assert "voice_best" not in ident and ident["stranger_on_screen"] is False
     cd.window_evidence = [{**ev, "voice_best": 0.5}]
     assert conversations(cd, policy())[0].identity["voice_best"] == 0.5
+
+
+def test_edge_speech_warns_at_clip_end():
+    from magicvideo.plan.planner import edge_speech_warnings
+
+    cd = clipdata(clip(cid="c_la", duration=23.1), [(15.0, 16.0, "a"), (20.5, 21.7, "end")], speakers=[A, B])
+    conv = conversations(cd, policy())
+    assert conv
+    warns = edge_speech_warnings(conv, {cd.id: cd}, policy())
+    assert warns == ["c_la.mp4: speech runs to the end of the file (last word ends at 21.7s of 23.1s); "
+                     "the sentence may be cut. If you trimmed this clip, export it a few seconds longer."]
+
+
+def test_edge_speech_quiet_when_there_is_room():
+    from magicvideo.plan.planner import edge_speech_warnings
+
+    cd = clipdata(clip(duration=23.1), [(1.0, 1.5, "a"), (17.0, 18.0, "b")], speakers=[A, B])
+    sel = conversations(cd, policy())
+    assert sel and edge_speech_warnings(sel, {cd.id: cd}, policy()) == []
