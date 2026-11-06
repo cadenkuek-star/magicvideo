@@ -124,3 +124,19 @@ def test_couple_override_counts_as_couple():
     third = sum(eff_len(m) for m in selected if m.cls == "third_party")
     assert couple == 5.0 and third == (5.0 if other.selected else 0.0)
     assert tp not in [m for m in selected if m.cls == "third_party"]
+
+
+def test_couple_override_not_trimmed_or_budgeted():
+    from magicvideo.plan.budget import apply_overrides
+
+    p = policy()
+    cd = clipdata(clip(duration=600))
+    tp = Moment(id="t1", clip_id=cd.id, kind="third_party", t0=100, t1=120, abs_t0=100, cls="third_party",
+                event_id="e1")
+    over = {"moments": {"t1": "couple"}, "events": {}}
+    apply_overrides([tp], {cd.id: cd}, over)
+    ev = _ev(typ="performance")
+    select_event(ev, [tp], {cd.id: cd}, p, over)
+    assert tp.selected and tp.reason == "kept in review (this is us)"
+    assert (tp.t0, tp.t1) == (100, 120)          # whole moment, not cut to the 8 s excerpt
+    assert ev.third_party_used == 0
