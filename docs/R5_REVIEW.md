@@ -62,3 +62,58 @@ Evidence required:
 - `git log --oneline c906d68..HEAD` and `git status --short`.
 
 Append `## Coder response R01` to `docs/R5_HANDOVER.md`. The reviewer will re-run the real-footage harness.
+
+## Review R02 — 2026-11-06
+
+**Verdict: REVISE (narrow, tests only).** Head reviewed: `b109fc0`.
+
+### What I ran
+- Fresh clone. Full suite: **113 passed** (my run). `git status` after the run was clean. R01 of this log is
+  unchanged.
+- **Real footage, fixed code** (owner's PC, harness `C:\Travel\scratch\r5_realcheck2.py`):
+  - v004: **458/458 present, ratio 1.0**; corr p5 0.996, median 1.0; 10.8 s.
+  - Negative controls on the same real film:
+    - master mapping shifted +0.3 s → 4/458 present;
+    - mapping shifted −0.3 s → 6/458;
+    - expected gain raised by 20 dB → 0/458.
+
+  The check passes a correct film and fails shifted or attenuated speech.
+- 8 mutations: **5 killed, 3 survived.**
+
+| # | Mutation | Result |
+| --- | --- | --- |
+| 1 | lag 0 only | killed (test_word_present_with_gain_and_small_lag) |
+| 2 | level floor ignored | killed (test_word_absent_below_level_floor) |
+| 3 | `dialogue_gains_db` not used | **SURVIVED** |
+| 4 | silent window counted present | killed (test_word_absent_when_master_silent) |
+| 5 | wrong master offset | killed (test_e2e::test_plan_render_qc) |
+| 6 | verdict decided by Whisper | killed (test_e2e::test_plan_render_qc) |
+| 7 | analysis runner does not pass the policy language | **SURVIVED** (only the helper is tested) |
+| 8 | level from the whole padded slice instead of the centre window | **SURVIVED** |
+
+### Rulings (tests only; no production change)
+- **R02-1** `tests/test_signal_speech.py::test_signal_presence_uses_dialogue_gain`: the real-file setup with the
+  master audio at −20 dB.
+  - `render_log = {"loudness": {"dialogue_gains_db": {"s1": -20.0}}}` → ratio 1.0.
+  - The same with `render_log = {}` → ratio 0.0.
+- **R02-2** `tests/test_qc_speech.py::test_analysis_runner_passes_policy_language`:
+  - make one tiny synthetic clip with ffmpeg (tone, about 2 s) and a project via `Project.init`;
+  - set `compute.asr_language: yue` in the trip's `policy.yaml`;
+  - monkeypatch `magicvideo.analysis.asr.load_model` to return `object()`, and `asr.transcribe` to record kwargs
+    and return `{"backend": "x", "language": "yue", "words": [], "segments": []}`;
+  - run `run_analysis(project, ["asr"])` → recorded `language == "yue"`;
+  - if `run_analysis` needs other steps first, include only the steps required and say so in the handover.
+- **R02-3** `tests/test_signal_speech.py::test_word_present_level_uses_centre_window`:
+  - `s` = a noise burst;
+  - `m` = padding filled with loud independent noise (same RMS as `s`), and the centre = `s × 0.05`;
+  - with lag 0.05, min_corr 0.6, min_level −12 and gain 0 → absent (level ≈ −26 dB).
+
+### Expected count and evidence for R03
+**116 collected, 116 passed**, a prediction.
+
+Evidence required:
+- three `test(R02-n)` commits;
+- the full suite run once;
+- `git log --oneline b109fc0..HEAD` and `git status --short`.
+
+Append `## Coder response R02` to `docs/R5_HANDOVER.md`.
