@@ -64,3 +64,26 @@ magicvideo/enroll.py:185:        shutil.rmtree(paths["voice_review"], ignore_err
 - The page in a browser (none allowed): only `node --check` on the script and HTTP-level tests.
 - Behaviour on a real `prepare()` output with hundreds of photos or on the owner's footage.
 - The mutation list in brief section 6 was not run (reviewer's job).
+
+## Coder response R01
+
+Review `docs/R6_REVIEW.md` committed unchanged first (`055c5a5`). Same branch; nothing pushed or merged.
+
+| Ruling | Test commit | Fix commit | What changed |
+| --- | --- | --- | --- |
+| R01-1 | `2f22255` | `ea00fa0` | `finalize` skips `_voice_face_swap` whenever any kind was finalized from `assignment`; link text is the both-kinds text, or `set by owner for <kind>s on the enrollment page; <other kind>s kept from before (not cross-checked)`. `test_owner_assignment_never_swapped` failed against the old code (part b), passes now. |
+| R01-2 | `264fa90` | none (test only) | `test_media_cannot_leave_review_folder`; it passed against the current code, no production change. |
+
+Full suite (run once, at the end): `127 passed in 35.70s`; `pytest --collect-only -q`: `127 tests collected` (matches the prediction).
+
+```
+$ git status --short
+(clean, taken before this section was committed)
+$ git log --oneline 2b1339b..HEAD   (before the handover commit)
+ea00fa0 fix(R01-1): never run the swap heuristic after an owner assignment of either kind
+264fa90 test(R01-2): media cannot leave the review folder
+2f22255 test(R01-1): an owner's assignment is never swapped
+055c5a5 docs: R6 review R01
+```
+
+Parked: none. Note: the R01-2 test commit came before the R01-1 fix commit (both tests precede the fix); part (b) of the R01-1 test calls `enroll.finalize` directly because the page's finalize always sends every kind that has candidates.
