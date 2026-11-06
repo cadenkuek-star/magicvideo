@@ -1,7 +1,9 @@
-"""Scene tags from a cloud vision model (Anthropic API). Low-res frames only (brief §2 rule 7).
+"""Scene tags from a vision model: the coding agent (default) or the Anthropic API. Low-res frames only.
 
-Frames (long side <= cloud.max_frame_px) are tiled into labelled grids, one grid per request.
-Nothing else (audio, transcripts, face crops, embeddings, GPS) is ever sent.
+Frames (long side <= cloud.max_frame_px) are tiled into labelled 3x3 grids, one grid per request.
+Only these low-res grids are ever seen by a model: with `cloud.provider: anthropic` they are sent to the API,
+with `cloud.provider: agent` they are written to `<work>/tagging/` and the agent's model (for example Gemini in
+Antigravity) views them there. Nothing else (audio, transcripts, face crops, embeddings, GPS) is ever sent or shown.
 """
 from __future__ import annotations
 
@@ -10,14 +12,19 @@ import json
 import os
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from .. import ffmpeg
 from ..policy import Policy
 from ..util import log
+from ..util import read_json, write_json
 from .asr import BackendMissing
 from .views360 import analysis_view_filter, view_yaws
+
+if TYPE_CHECKING:
+    from ..project import Project
 
 DEFAULT_MODEL = "claude-opus-5-5"   # change with cloud.model in policy.yaml (e.g. a cheaper Haiku for volume)
 
@@ -129,6 +136,24 @@ def make_grid(frames: list[np.ndarray], cols: int = 3) -> np.ndarray:
     return grid
 
 
+def clean_cells(cells: list, n: int) -> list[dict | None]:
+    """Sanitise model answers into one entry (or None) per cell 1..n: allowed tags only, clamped interest."""
+    by_cell = {int(c.get("cell", 0)): c for c in cells if isinstance(c, dict)}
+    out: list[dict | None] = []
+    for i in range(1, n + 1):
+        c = by_cell.get(i)
+        if c is None:
+            out.append(None)
+            continue
+        out.append({
+            "tags": sorted({t for t in c.get("tags", []) if t in TAGS}),
+            "people": c.get("people") if c.get("people") in PEOPLE else "none",
+            "interest": float(np.clip(float(c.get("interest", 0.5)), 0.0, 1.0)),
+            "desc": str(c.get("desc", ""))[:120],
+        })
+    return out
+
+
 # --------------------------------------------------------------------------- API
 class Tagger:
     def __init__(self, policy: Policy):
@@ -202,20 +227,7 @@ class Tagger:
                 cells = json.loads(text)["cells"]
             except (ValueError, KeyError, TypeError):
                 return None
-            by_cell = {int(c.get("cell", 0)): c for c in cells if isinstance(c, dict)}
-            out = []
-            for i in range(1, n + 1):
-                c = by_cell.get(i)
-                if c is None:
-                    out.append(None)
-                    continue
-                out.append({
-                    "tags": sorted({t for t in c.get("tags", []) if t in TAGS}),
-                    "people": c.get("people") if c.get("people") in PEOPLE else "none",
-                    "interest": float(np.clip(float(c.get("interest", 0.5)), 0.0, 1.0)),
-                    "desc": str(c.get("desc", ""))[:120],
-                })
-            return out
+            return clean_cells(cells, n)
         return None
 
 
@@ -242,3 +254,175 @@ def analyze(path: Path, clip: dict, policy: Policy, tagger: Tagger | None = None
     frames_out.sort(key=lambda f: (f["t"], f.get("view", -1)))
     return {"backend": f"anthropic:{tagger.model}", "frames": frames_out,
             "frames_sent": int((previous or {}).get("frames_sent", 0)) + sent}
+
+
+# --------------------------------------------------------------------------- agent (no API key)
+def tagging_dir(project: "Project") -> Path:
+    return project.root / "tagging"
+
+
+def _grid_stem(i: int) -> str:
+    return f"grid_{i:03d}"
+
+
+def export_for_agent(project: "Project", clip: dict, path: Path, policy: Policy) -> int:
+    """Write this clip's frame grids to <work>/tagging/<clip_id>/ for the agent to look at; returns grids written.
+
+    Grids are cut from the full frame list so their numbers stay stable; a grid whose frames are all in
+    analysis/<clip>/tags.json already is skipped.
+    """
+    import cv2
+    per = int(policy("cloud.frames_per_request"))
+    cid = clip["clip_id"]
+    previous = read_json(project.analysis_dir(cid) / "tags.json") or {}
+    done = {(round(f["t"], 2), f.get("view")) for f in previous.get("frames", [])}
+    frames = sample_frames(Path(path), clip, policy)
+    out_dir = tagging_dir(project) / cid
+    written = 0
+    for g, i in enumerate(range(0, len(frames), per), 1):
+        chunk = frames[i:i + per]
+        if all((round(t, 2), v) in done for t, v, _ in chunk):
+            continue
+        ok, buf = cv2.imencode(".jpg", make_grid([img for _, _, img in chunk]), [cv2.IMWRITE_JPEG_QUALITY, 80])
+        if not ok:
+            continue
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / f"{_grid_stem(g)}.jpg").write_bytes(buf.tobytes())
+        write_json(out_dir / f"{_grid_stem(g)}.cells.json",
+                   [{"cell": k, "t": t, "view": v} for k, (t, v, _) in enumerate(chunk, 1)])
+        written += 1
+    return written
+
+
+def pending_grids(project: "Project") -> list[Path]:
+    """Every exported grid image that has no answer file yet, in a stable order."""
+    base = tagging_dir(project)
+    if not base.exists():
+        return []
+    return [g for g in sorted(base.glob("*/grid_*.jpg")) if not g.with_suffix(".answer.json").exists()]
+
+
+TASKS_TEXT = """# Scene tagging tasks
+
+Each grid image below is a 3x3 contact sheet of numbered frames from one video (cell 1 is top left).
+Look at every grid in the checklist and write one answer file for it.
+
+## Instructions
+
+{system_prompt}
+
+Allowed tags: {tags}
+
+Allowed people values: {people}
+
+## Answer files
+
+Next to each grid write `grid_NNN.answer.json` (same folder, same number as the grid image), containing
+only JSON of this shape, with one entry per cell. The grid's `grid_NNN.cells.json` lists how many cells it has
+(a grid can have fewer than 9); use cell numbers 1..n only, and `interest` between 0.0 and 1.0.
+
+```json
+{schema}
+```
+
+When you are done, run: magicvideo tags import "{work}"
+
+## Grids to answer ({count})
+
+{checklist}
+"""
+
+
+def write_tasks(project: "Project") -> int:
+    """Write <work>/tagging/TASKS.md listing every unanswered grid; returns how many are waiting."""
+    pending = pending_grids(project)
+    base = tagging_dir(project)
+    base.mkdir(parents=True, exist_ok=True)
+    text = TASKS_TEXT.format(
+        system_prompt=SYSTEM_PROMPT, tags=", ".join(TAGS), people=", ".join(PEOPLE),
+        schema=json.dumps(response_schema(9), indent=2), work=project.root, count=len(pending),
+        checklist="\n".join(f"- [ ] {g}" for g in pending) or "(none: everything is answered)")
+    (base / "TASKS.md").write_text(text, encoding="utf-8")
+    return len(pending)
+
+
+def export_all(project: "Project") -> int:
+    """`magicvideo tags export`: grids for every plannable clip, then TASKS.md. Returns grids waiting."""
+    from .. import ingest
+    policy = project.policy
+    if not policy("cloud.scene_tagging"):
+        raise BackendMissing("cloud.scene_tagging is false")
+    for clip in ingest.plannable(project.inventory()):
+        export_for_agent(project, clip, Path(clip["analysis_path"]), policy)
+    return write_tasks(project)
+
+
+def _valid_cells(payload, n: int) -> list | None:
+    """The answer's cells when every cell is a dict with an integer number in 1..n, else None."""
+    cells = payload.get("cells") if isinstance(payload, dict) else None
+    if not isinstance(cells, list):
+        return None
+    for c in cells:
+        num = c.get("cell") if isinstance(c, dict) else None
+        if isinstance(num, bool) or not isinstance(num, int) or not 1 <= num <= n:
+            return None
+    return cells
+
+
+def import_agent_tags(project: "Project") -> dict:
+    """Merge the agent's grid_NNN.answer.json files into analysis/<clip>/tags.json (idempotent on (t, view)).
+
+    Returns {"imported": grids that added frames, "frames_added": int, "invalid": [reasons], "missing": grids
+    still unanswered}. An invalid answer (bad JSON, cells outside 1..n) skips that grid and changes nothing.
+    """
+    base = tagging_dir(project)
+    result = {"imported": 0, "frames_added": 0, "invalid": [], "missing": 0}
+    if not base.exists():
+        return result
+    for cdir in sorted(d for d in base.iterdir() if d.is_dir()):
+        cid = cdir.name
+        grids = sorted(cdir.glob("grid_*.jpg"))
+        tags_path = project.analysis_dir(cid) / "tags.json"
+        data = read_json(tags_path) or {"frames": []}
+        frames = list(data.get("frames", []))
+        known = {(round(f["t"], 2), f.get("view")) for f in frames}
+        added_total = 0
+        all_ok = bool(grids)
+        for g in grids:
+            answer = g.with_suffix(".answer.json")
+            if not answer.exists():
+                result["missing"] += 1
+                all_ok = False
+                continue
+            try:
+                cells_meta = read_json(g.with_suffix(".cells.json"))
+                payload = json.loads(answer.read_text(encoding="utf-8-sig"))
+                cells = _valid_cells(payload, len(cells_meta))
+            except (ValueError, OSError, TypeError):
+                cells = None
+            if cells is None:
+                result["invalid"].append(f"{answer}: not valid JSON of the form {{\"cells\": [...]}} with cells 1..n")
+                all_ok = False
+                continue
+            added = 0
+            for meta, r in zip(cells_meta, clean_cells(cells, len(cells_meta))):
+                key = (round(meta["t"], 2), meta.get("view"))
+                if r is None or key in known:
+                    continue
+                entry = {"t": meta["t"], **r}
+                if meta.get("view") is not None:
+                    entry["view"] = meta["view"]
+                frames.append(entry)
+                known.add(key)
+                added += 1
+            if added:
+                result["imported"] += 1
+                added_total += added
+        if added_total:
+            frames.sort(key=lambda f: (f["t"], f.get("view", -1)))
+            write_json(tags_path, {"backend": "agent", "frames": frames,
+                                   "frames_sent": int(data.get("frames_sent", 0)) + added_total})
+            result["frames_added"] += added_total
+        if all_ok:
+            project.set_step_status(cid, "tags", "done")
+    return result

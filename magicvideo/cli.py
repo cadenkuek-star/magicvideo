@@ -43,6 +43,13 @@ def cmd_analyze(a: argparse.Namespace) -> int:
     summary = run_analysis(Project(Path(a.work)), steps, a.force)
     for step, counts in summary.items():
         print(f"{step:<8} done={counts['done']} skipped={counts['skipped']} failed={counts['failed']}")
+    p = Project(Path(a.work))
+    if "tags" in summary and p.policy("cloud.provider") == "agent" and p.policy("cloud.scene_tagging"):
+        from .analysis import tags
+        waiting = len(tags.pending_grids(p))
+        if waiting:
+            print(f"tags: {waiting} grids waiting \u2014 ask the agent to answer {p.root / 'tagging' / 'TASKS.md'}, "
+                  f"then run magicvideo tags import")
     return 0
 
 
@@ -59,6 +66,23 @@ def cmd_enroll(a: argparse.Namespace) -> int:
     r = enroll.prepare(p)
     print(f"{r['faces']} face candidates, {r['voices']} voice candidates exported to {p.people_dir}")
     print(f"follow {p.people_dir / ('REVIEW_' + p.name + '.md')}, then run: magicvideo enroll \"{p.root}\" --finalize")
+    return 0
+
+
+def cmd_tags(a: argparse.Namespace) -> int:
+    from .analysis import tags
+    p = Project(Path(a.work))
+    if a.action == "export":
+        waiting = tags.export_all(p)
+        print(f"{waiting} grids waiting: ask the agent to answer {p.root / 'tagging' / 'TASKS.md'}, "
+              f"then run magicvideo tags import \"{p.root}\"")
+        return 0
+    r = tags.import_agent_tags(p)
+    print(f"imported: {r['imported']} grids ({r['frames_added']} frames)")
+    print(f"invalid : {len(r['invalid'])}")
+    for line in r["invalid"]:
+        print(f"  {line}")
+    print(f"missing : {r['missing']} grids still unanswered")
     return 0
 
 
@@ -132,6 +156,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--allow-sparse", action="store_true",
                    help="with --finalize: accept a partner with fewer files than the minimum (down to 1)")
     s.set_defaults(fn=cmd_enroll)
+    s = sub.add_parser("tags", help="scene tags answered by the coding agent (no API key)")
+    s.add_argument("action", choices=["export", "import"]); s.add_argument("work")
+    s.set_defaults(fn=cmd_tags)
     s = sub.add_parser("plan")
     s.add_argument("work"); s.add_argument("--thumbs", action="store_true", help="add thumbnails to the storyboard")
     s.set_defaults(fn=cmd_plan)

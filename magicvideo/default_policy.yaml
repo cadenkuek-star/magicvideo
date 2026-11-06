@@ -12,7 +12,7 @@ compute:
 
 cloud:                           # scene tagging only; nothing else ever leaves the machine
   scene_tagging: true
-  provider: anthropic
+  provider: agent                # agent = the coding agent (Antigravity/Gemini) views frame grids on disk; anthropic = API key
   model: null                    # null = claude-opus-5-5; set e.g. claude-haiku-5-5 to cut tagging cost
   effort: low                    # tagging is simple classification
   api_key_env: ANTHROPIC_API_KEY

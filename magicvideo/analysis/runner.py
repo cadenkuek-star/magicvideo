@@ -12,6 +12,7 @@ from . import asr, faces, quality, tags, voices
 from .asr import BackendMissing
 
 ALL_STEPS = ["quality", "asr", "voices", "faces", "tags"]
+AWAITING_AGENT = "skipped: awaiting agent tags"
 
 
 def _done(status: str | None) -> bool:
@@ -100,6 +101,16 @@ def run_analysis(project: Project, steps: list[str] | None = None, force: bool =
                     data, emb = faces.analyze(apath, clip, policy)
                     write_json(adir / "faces.json", data)
                     np.save(adir / "face_emb.npy", emb)
+                elif step == "tags" and policy("cloud.provider") == "agent":
+                    if not policy("cloud.scene_tagging"):
+                        raise BackendMissing("cloud.scene_tagging is false")
+                    if tags.export_for_agent(project, clip, apath, policy) == 0:
+                        project.set_step_status(cid, step, "done")  # nothing left to tag
+                        summary[step]["done"] += 1
+                    else:
+                        project.set_step_status(cid, step, AWAITING_AGENT)
+                        summary[step]["skipped"] += 1
+                    continue
                 elif step == "tags":
                     tagger = backend("tags")
                     prev = read_json(adir / "tags.json") if not force else None
@@ -115,6 +126,8 @@ def run_analysis(project: Project, steps: list[str] | None = None, force: bool =
                 log.exception("%s failed for %s", step, clip["rel_path"])
                 project.set_step_status(cid, step, f"failed:{e}")
                 summary[step]["failed"] += 1
+    if "tags" in steps and policy("cloud.provider") == "agent" and policy("cloud.scene_tagging"):
+        tags.write_tasks(project)
     for step, reason in unavailable.items():
         log.warning("step %s skipped for all clips: %s", step, reason)
     write_json(project.root / "analysis" / "summary.json", {"steps": summary, "unavailable": unavailable})
