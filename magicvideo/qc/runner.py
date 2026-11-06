@@ -250,20 +250,26 @@ def collect_planned_word_spans(convs: list[dict], cds: dict, seg_spans: dict, ti
 
 def word_present(m: np.ndarray, s: np.ndarray, sr: int, max_lag_s: float, min_corr: float, min_level_db: float,
                  gain_db: float) -> tuple[bool, float, float]:
-    """(present, best_corr, level_db): is source word s audible in master slice m (any lag within max_lag_s)."""
+    """(present, best_corr, level_db): is source word s audible in master slice m?
+
+    `m` is the master slice padded by L = round(max_lag_s*sr) samples on both sides of the word. s is compared with
+    every full window m[k:k+len(s)], k in 0..2L (zero-mean, normalised correlation); the level uses the centre
+    window m[L:L+len(s)]. Too short or silent input gives corr 0 and the word is absent.
+    """
     m = np.asarray(m, np.float64)
     s = np.asarray(s, np.float64)
+    n, L = len(s), int(round(max_lag_s * sr))
     rms = lambda x: float(np.sqrt(np.mean(x ** 2))) if len(x) else 0.0  # noqa: E731
-    level = 20 * math.log10(max(rms(m), 1e-9) / max(rms(s), 1e-9)) - gain_db
+    centre = m[L:L + n]
+    level = 20 * math.log10(max(rms(centre), 1e-9) / max(rms(s), 1e-9)) - gain_db
     best = 0.0
-    if len(m) and len(s) and rms(m) > 1e-9 and rms(s) > 1e-9:
-        L = int(round(max_lag_s * sr))
-        for k in range(-L, L + 1):          # compare s[i] with m[i + k] over the overlap
-            a, b = max(0, -k), min(len(s), len(m) - k)
-            if b - a < 8:
-                continue
-            x, y = s[a:b] - s[a:b].mean(), m[a + k:b + k] - m[a + k:b + k].mean()
-            den = math.sqrt(float(x @ x) * float(y @ y))
+    if n >= 8 and len(m) >= n and rms(m) > 1e-9 and rms(s) > 1e-9:
+        x = s - s.mean()
+        xn = math.sqrt(float(x @ x))
+        for k in range(0, min(2 * L, len(m) - n) + 1):
+            y = m[k:k + n]
+            y = y - y.mean()
+            den = xn * math.sqrt(float(y @ y))
             if den > 1e-12:
                 best = max(best, float(x @ y) / den)
     return bool(best >= min_corr and level >= min_level_db), best, level
