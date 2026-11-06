@@ -182,6 +182,13 @@ insta360:
 
 qc:
   fold_chinese_script: true       # compare Simplified and Traditional as the same (needs zhconv)
+  signal_check: true              # decide speech.partner_words_rendered by comparing master audio with the source
+  signal_sr: 16000
+  signal_min_corr: 0.6            # normalised correlation (best lag) for a word to count as present
+  signal_max_lag_s: 0.05
+  signal_min_level_db: -12.0      # master word level relative to the source word level, after known gains
+  rendered_signal_match_min: 0.98 # pass line for the signal method
+  asr_crosscheck: true            # still run the Whisper comparison when available, as information
   speech_span_merge_gap_s: 2.0     # QC transcribes the master in spans of one language; merge spans closer than this
   speech_missing_run_min: 3        # report runs of at least this many unheard planned tokens
   couple_word_retention_min: 0.98   # planned: partner words kept in the timeline

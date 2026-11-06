@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import difflib
+import math
+import subprocess
 import re
 import struct
 from fractions import Fraction
 from pathlib import Path
+
+import numpy as np
 
 from .. import ffmpeg
 from ..enroll import load_refs
@@ -222,7 +226,105 @@ def collect_planned_words(convs: list[dict], cds: dict, seg_spans: dict, timelin
     return total, kept, planned_words
 
 
-def editorial(project: Project, plan: dict, timeline: dict, policy: Policy, master: Path | None) -> list[dict]:
+def collect_planned_word_spans(convs: list[dict], cds: dict, seg_spans: dict, timeline: dict, fps: float,
+                               policy: Policy) -> list[dict]:
+    """Planned partner words with source and master times, in film order (same words as collect_planned_words)."""
+    out: list[dict] = []
+    for m in sorted(convs, key=lambda m: m["abs_t0"]):
+        cd = cds[m["clip_id"]]
+        for i in cd.words_in(m["t0"], m["t1"]):
+            if not is_couple_speaker(cd.word_speaker(i), policy):
+                continue
+            w = cd.words[i]
+            mid = (w["t0"] + w["t1"]) / 2
+            if not _covered(seg_spans, m["clip_id"], mid):
+                continue
+            seg = next(sg for sg in timeline["segments"] if sg["clip_id"] == m["clip_id"]
+                       and sg["src_in"] <= mid < sg["src_in"] + sg["frames"] / fps)
+            base = seg["start_frame"] / fps - seg["src_in"]
+            out.append({"w": w["w"], "clip_id": m["clip_id"], "src_t0": w["t0"], "src_t1": w["t1"],
+                        "m_t0": base + w["t0"], "m_t1": base + w["t1"], "seg_id": seg["id"]})
+    out.sort(key=lambda d: (d["m_t0"], d["src_t0"]))
+    return out
+
+
+def word_present(m: np.ndarray, s: np.ndarray, sr: int, max_lag_s: float, min_corr: float, min_level_db: float,
+                 gain_db: float) -> tuple[bool, float, float]:
+    """(present, best_corr, level_db): is source word s audible in master slice m (any lag within max_lag_s)."""
+    m = np.asarray(m, np.float64)
+    s = np.asarray(s, np.float64)
+    rms = lambda x: float(np.sqrt(np.mean(x ** 2))) if len(x) else 0.0  # noqa: E731
+    level = 20 * math.log10(max(rms(m), 1e-9) / max(rms(s), 1e-9)) - gain_db
+    best = 0.0
+    if len(m) and len(s) and rms(m) > 1e-9 and rms(s) > 1e-9:
+        L = int(round(max_lag_s * sr))
+        for k in range(-L, L + 1):          # compare s[i] with m[i + k] over the overlap
+            a, b = max(0, -k), min(len(s), len(m) - k)
+            if b - a < 8:
+                continue
+            x, y = s[a:b] - s[a:b].mean(), m[a + k:b + k] - m[a + k:b + k].mean()
+            den = math.sqrt(float(x @ x) * float(y @ y))
+            if den > 1e-12:
+                best = max(best, float(x @ y) / den)
+    return bool(best >= min_corr and level >= min_level_db), best, level
+
+
+def _decode_mono(path: Path, t0: float, t1: float, sr: int) -> np.ndarray:
+    cmd = [ffmpeg.ffmpeg_bin(), "-hide_banner", "-nostdin", "-v", "error", "-ss", f"{t0:.6f}", "-t",
+           f"{max(t1 - t0, 0.01):.6f}", "-i", str(path), "-vn", "-map", "0:a:0", "-f", "f32le", "-ac", "1",
+           "-ar", str(sr), "-"]
+    return np.frombuffer(subprocess.run(cmd, capture_output=True).stdout, dtype=np.float32)
+
+
+def signal_word_presence(master: Path, words: list[dict], inventory: dict, render_log: dict, policy: Policy) -> dict:
+    """Is each planned word's source audio present in the master? Decoded per segment, never the whole master."""
+    sr = int(policy("qc.signal_sr"))
+    lag = float(policy("qc.signal_max_lag_s"))
+    min_corr = float(policy("qc.signal_min_corr"))
+    min_level = float(policy("qc.signal_min_level_db"))
+    loud = (render_log or {}).get("loudness", {}) or {}
+    master_gain = float(loud.get("gain_db", 0.0)) - float((loud.get("post_encode") or {}).get("global_db", 0.0))
+    dlg = loud.get("dialogue_gains_db", {}) or {}
+    groups: dict[str, list[dict]] = {}
+    for w in words:
+        groups.setdefault(w["seg_id"], []).append(w)
+    results: dict[int, dict] = {}
+    for seg_id, ws in groups.items():
+        gain = float(dlg.get(seg_id, 0.0)) + master_gain
+        m0 = max(0.0, min(w["m_t0"] for w in ws) - lag)
+        m1 = max(w["m_t1"] for w in ws) + lag
+        s0 = max(0.0, min(w["src_t0"] for w in ws) - lag)
+        s1 = max(w["src_t1"] for w in ws) + lag
+        mm = _decode_mono(master, m0, m1, sr)
+        ss = _decode_mono(Path(inventory[ws[0]["clip_id"]]["render_path"]), s0, s1, sr)
+        for w in ws:
+            ms = mm[max(0, int(round((w["m_t0"] - lag - m0) * sr))):max(0, int(round((w["m_t1"] + lag - m0) * sr)))]
+            sw = ss[max(0, int(round((w["src_t0"] - s0) * sr))):max(0, int(round((w["src_t1"] - s0) * sr)))]
+            ok, corr, lvl = word_present(ms, sw, sr, lag, min_corr, min_level, gain)
+            results[id(w)] = {"m_t0": round(w["m_t0"], 3), "w": w["w"], "present": ok, "corr": round(corr, 3),
+                              "level_db": round(lvl, 3)}
+    rows = [results[id(w)] for w in words]
+    present = sum(r["present"] for r in rows)
+    min_run = int(policy("qc.speech_missing_run_min"))
+    runs: list[dict] = []
+    i = 0
+    while i < len(rows):
+        if rows[i]["present"]:
+            i += 1
+            continue
+        j = i
+        while j < len(rows) and not rows[j]["present"]:
+            j += 1
+        if j - i >= min_run:
+            runs.append({"t0": round(rows[i]["m_t0"], 1), "t1": round(rows[j - 1]["m_t0"], 1),
+                         "text": " ".join(r["w"] for r in rows[i:j])})
+        i = j
+    return {"present": present, "total": len(rows), "ratio": (present / len(rows)) if rows else 0.0,
+            "absent_runs": runs, "words": rows}
+
+
+def editorial(project: Project, plan: dict, timeline: dict, policy: Policy, master: Path | None,
+              render_log: dict | None = None) -> list[dict]:
     out = []
     fps = float(Fraction(*timeline["fps"]))
     refs = load_refs(project.people_dir)
@@ -247,39 +349,61 @@ def editorial(project: Project, plan: dict, timeline: dict, policy: Policy, mast
         out.append(check("speech.partner_words_planned", PASS if r >= lim else FAIL, round(r, 4), f">= {lim}",
                          f"{kept}/{total} words; conversations dropped by review/runtime: {len(dropped)}"))
 
-    # independent check: re-transcribe the rendered master
+    # independent check: is the planned speech in the rendered master?
     lim_r = float(policy("qc.rendered_word_match_min"))
+    use_signal = bool(policy("qc.signal_check"))
+    asr_part: dict = {}
+    if (not use_signal or policy("qc.asr_crosscheck")) and master is not None and planned_words:
+        try:
+            from ..analysis import asr
+            times = [t for _, t in planned_words]
+            used = [sg for sg in timeline["segments"]
+                    if any(sg["start_frame"] / fps <= t < (sg["start_frame"] + sg["frames"]) / fps for t in times)]
+            clip_lang = {cid: (read_json(project.analysis_dir(cid) / "transcript.json") or {}).get("language")
+                         for cid in sorted({sg["clip_id"] for sg in used})}
+            spans = language_spans(used, clip_lang, fps, float(policy("qc.speech_span_merge_gap_s")))
+            heard: list[str] = []
+            for k, sp in enumerate(spans):
+                wav = project.qc_dir / f"{master.stem}_span{k:03d}_16k.wav"
+                a0 = max(0.0, sp["t0"] - 0.3)
+                ffmpeg.run(["-y", "-v", "error", "-ss", f"{a0:.3f}", "-t", f"{sp['t1'] + 0.3 - a0:.3f}", "-i",
+                            str(master), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav)])
+                try:
+                    heard += [w["w"] for w in asr.transcribe(wav, policy, language=sp["lang"])["words"]]
+                finally:
+                    wav.unlink(missing_ok=True)
+            fold = bool(policy("qc.fold_chinese_script"))
+            res = rendered_speech_check(planned_words, heard, fold, int(policy("qc.speech_missing_run_min")))
+            asr_part = {"planned": speech_tokens([w for w, _ in planned_words], fold),
+                        "heard": speech_tokens(heard, fold), "spans": spans, "result": res, "fold": fold}
+        except Exception as e:
+            asr_part = {"asr": {"error": str(e)[:200]}}
     try:
         if master is None or not planned_words:
             raise RuntimeError("nothing to compare")
-        from ..analysis import asr
-        times = [t for _, t in planned_words]
-        used = [sg for sg in timeline["segments"]
-                if any(sg["start_frame"] / fps <= t < (sg["start_frame"] + sg["frames"]) / fps for t in times)]
-        clip_lang = {cid: (read_json(project.analysis_dir(cid) / "transcript.json") or {}).get("language")
-                     for cid in sorted({sg["clip_id"] for sg in used})}
-        spans = language_spans(used, clip_lang, fps, float(policy("qc.speech_span_merge_gap_s")))
-        heard: list[str] = []
-        for k, sp in enumerate(spans):
-            wav = project.qc_dir / f"{master.stem}_span{k:03d}_16k.wav"
-            a = max(0.0, sp["t0"] - 0.3)
-            ffmpeg.run(["-y", "-v", "error", "-ss", f"{a:.3f}", "-t", f"{sp['t1'] + 0.3 - a:.3f}", "-i", str(master),
-                        "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav)])
-            try:
-                heard += [w["w"] for w in asr.transcribe(wav, policy, language=sp["lang"])["words"]]
-            finally:
-                wav.unlink(missing_ok=True)
-        fold = bool(policy("qc.fold_chinese_script"))
-        res = rendered_speech_check(planned_words, heard, fold, int(policy("qc.speech_missing_run_min")))
         report = project.qc_dir / f"{master.stem}_speech.json"
-        write_json(report, {"planned": speech_tokens([w for w, _ in planned_words], fold),
-                            "heard": speech_tokens(heard, fold), "spans": spans, "result": res})
-        detail = (f"{res['matched']}/{res['total']} planned partner characters/words heard; "
-                  f"{len(res['missing_runs'])} unheard runs (see {report.name})")
-        if fold and not res["folded"]:
-            detail += "; script folding off (pip install zhconv)"
-        out.append(check("speech.partner_words_rendered", PASS if res["ratio"] >= lim_r else FAIL,
-                         round(res["ratio"], 4), f">= {lim_r}", detail))
+        if use_signal:
+            words = collect_planned_word_spans(convs, cds, seg_spans, timeline, fps, policy)
+            sig = signal_word_presence(master, words, inv, render_log or {}, policy)
+            write_json(report, {**{k: v for k, v in asr_part.items() if k != "fold"}, "signal": sig})
+            detail = (f"{sig['present']}/{sig['total']} planned partner words present in the master audio "
+                      f"(signal match); {len(sig['absent_runs'])} absent runs (see {report.name})")
+            if "result" in asr_part:
+                detail += f"; Whisper cross-check {asr_part['result']['ratio']:.2f} (information)"
+            out.append(check("speech.partner_words_rendered", PASS if sig["ratio"] >= float(
+                policy("qc.rendered_signal_match_min")) else FAIL, round(sig["ratio"], 4),
+                f">= {policy('qc.rendered_signal_match_min')}", detail))
+        else:
+            if "result" not in asr_part:
+                raise RuntimeError(asr_part.get("asr", {}).get("error", "ASR not run"))
+            res, fold = asr_part["result"], asr_part["fold"]
+            write_json(report, {k: v for k, v in asr_part.items() if k != "fold"})
+            detail = (f"{res['matched']}/{res['total']} planned partner characters/words heard; "
+                      f"{len(res['missing_runs'])} unheard runs (see {report.name})")
+            if fold and not res["folded"]:
+                detail += "; script folding off (pip install zhconv)"
+            out.append(check("speech.partner_words_rendered", PASS if res["ratio"] >= lim_r else FAIL,
+                             round(res["ratio"], 4), f">= {lim_r}", detail))
     except Exception as e:
         out.append(check("speech.partner_words_rendered", SKIPPED, None, f">= {lim_r}", f"not run: {e}"[:200]))
 
@@ -378,7 +502,7 @@ def run_qc(project: Project, version: str | None = None) -> tuple[str, Path]:
     plan = read_json(project.plan_dir / f"plan_{version}.json")
     master = Path(rlog["outputs"]["master"])
     chapters = [Path(p) for p in rlog["outputs"].get("chapters", [])]
-    checks = technical(master, timeline, rlog, policy, chapters) + editorial(project, plan, timeline, policy, master)
+    checks = technical(master, timeline, rlog, policy, chapters) + editorial(project, plan, timeline, policy, master, rlog)
     result = {"version": version, "master": str(master), "verdict": verdict(checks), "checks": checks,
               "generated_by": "magicvideo qc", "policy_sha": plan.get("policy_sha")}
     project.qc_dir.mkdir(parents=True, exist_ok=True)

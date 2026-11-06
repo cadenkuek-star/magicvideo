@@ -45,7 +45,8 @@ def _files(tmp_path, silent_master):
     rng = np.random.default_rng(3)
     x = np.zeros(3 * SR, np.float32)
     for a, b in ((0.5, 0.8), (1.5, 1.9)):
-        x[int(a * SR):int(b * SR)] = rng.normal(size=int((b - a) * SR)) * 0.3
+        i0, i1 = int(round(a * SR)), int(round(b * SR))
+        x[i0:i1] = rng.normal(size=i1 - i0) * 0.3
     raw = tmp_path / "src.f32"
     raw.write_bytes(x.tobytes())
     src = tmp_path / "src.wav"
