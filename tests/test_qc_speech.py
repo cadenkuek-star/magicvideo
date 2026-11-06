@@ -92,3 +92,33 @@ def test_analysis_passes_policy_language():
 
     assert runner._asr_language(policy()) is None
     assert runner._asr_language(policy(compute={"asr_language": "yue"})) == "yue"
+
+
+def test_analysis_runner_passes_policy_language(tmp_path, monkeypatch):
+    import yaml
+
+    from magicvideo import ffmpeg
+    from magicvideo.analysis import asr
+    from magicvideo.analysis.runner import run_analysis
+    from magicvideo.project import Project
+
+    src = tmp_path / "raw"
+    src.mkdir()
+    ffmpeg.run(["-y", "-v", "error", "-f", "lavfi", "-i", "color=black:s=64x64:r=10:d=2", "-f", "lavfi", "-i",
+                "sine=frequency=440:duration=2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+                "-shortest", str(src / "DJI_20260419083601_0001_D.MP4")])
+    p = Project.init(tmp_path / "work", [src], "T", tmp_path / "people")
+    pol = yaml.safe_load((p.root / "policy.yaml").read_text())
+    pol["compute"]["asr_language"] = "yue"
+    (p.root / "policy.yaml").write_text(yaml.safe_dump(pol))
+    p = Project(p.root)
+    seen = {}
+    monkeypatch.setattr(asr, "load_model", lambda policy: object())
+
+    def fake(path, policy, language=None):
+        seen["language"] = language
+        return {"backend": "x", "language": "yue", "words": [], "segments": []}
+
+    monkeypatch.setattr(asr, "transcribe", fake)
+    run_analysis(p, ["asr"])
+    assert seen["language"] == "yue"
