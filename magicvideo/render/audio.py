@@ -131,3 +131,81 @@ def master_loudness(raw: Path, out_wav: Path, policy: Policy) -> dict:
     log["gain_db"] = round(gain, 3)
     log["output"] = measure(out_wav, sr, False, target_i, tp_lim)
     return log
+
+
+# --------------------------------------------------------------------------- post-encode true-peak repair
+def _spots(x: np.ndarray, sr: int, threshold: float, merge_s: float) -> list[tuple[float, float]]:
+    """[(time, amplitude)] of over-threshold samples, nearby ones merged into the largest."""
+    a = np.abs(x) if x.ndim == 1 else np.abs(x).max(axis=1)
+    idx = np.flatnonzero(a > threshold)
+    spots: list[tuple[float, float]] = []
+    group: list[int] = []
+    for i in idx:
+        if group and (i - group[-1]) / sr > merge_s:
+            best = max(group, key=lambda j: (a[j], -j))
+            spots.append((best / sr, float(a[best])))
+            group = []
+        group.append(int(i))
+    if group:
+        best = max(group, key=lambda j: (a[j], -j))
+        spots.append((best / sr, float(a[best])))
+    return spots
+
+
+def _merge_spots(spots: list[tuple[float, float]], merge_s: float) -> list[tuple[float, float]]:
+    out: list[list[tuple[float, float]]] = []
+    for s in sorted(spots):
+        if out and s[0] - out[-1][-1][0] <= merge_s:
+            out[-1].append(s)
+        else:
+            out.append([s])
+    return [max(g, key=lambda s: (s[1], -s[0])) for g in out]
+
+
+def overshoot_times(x: np.ndarray, sr: int, threshold: float, merge_s: float = 0.05) -> list[float]:
+    """Times of samples above threshold (any channel); spots closer than merge_s keep the largest."""
+    return [t for t, _ in _spots(x, sr, threshold, merge_s)]
+
+
+def apply_dips(x: np.ndarray, sr: int, times: list[float], dip_db: float, win_ms: float) -> None:
+    """Multiply x in place by a raised-cosine gain dip (unity at the edges) around each time; minimum where they overlap."""
+    n = max(2, 2 * int(round(win_ms / 1000.0 * sr / 2)))
+    half = n // 2
+    g = 10 ** (-dip_db / 20)
+    env = 1.0 - (1.0 - g) * 0.5 * (1.0 + np.cos(2 * np.pi * np.arange(-half, half + 1) / n))
+    spans = sorted((int(round(t * sr)) - half, int(round(t * sr)) + half + 1) for t in times)
+    clusters: list[list[int]] = []
+    for a, b in spans:
+        if clusters and a < clusters[-1][1]:
+            clusters[-1][1] = max(clusters[-1][1], b)
+        else:
+            clusters.append([a, b])
+    for ca, cb in clusters:
+        gain = np.ones(cb - ca, np.float64)
+        for a, b in spans:
+            if a >= ca and b <= cb:
+                gain[a - ca:b - ca] = np.minimum(gain[a - ca:b - ca], env)
+        lo, hi = max(ca, 0), min(cb, len(x))
+        if hi > lo:
+            seg = gain[lo - ca:hi - ca].astype(np.float32)
+            x[lo:hi] = x[lo:hi] * (seg[:, None] if x.ndim == 2 else seg)
+
+
+def scan_true_peaks(path: Path, sr: int, threshold: float, chunk_s: float = 30.0, merge_s: float = 0.05) -> list[float]:
+    """Absolute times where the decoded (4x oversampled) file exceeds threshold; decoded in chunks."""
+    osr = 4 * sr
+    spots: list[tuple[float, float]] = []
+    start = 0.0
+    while True:
+        cmd = [ffmpeg.ffmpeg_bin(), "-hide_banner", "-nostdin", "-v", "error", "-ss", f"{start:.6f}",
+               "-t", f"{chunk_s:.6f}", "-i", str(path), "-vn", "-map", "0:a:0", "-f", "f32le", "-ac", "2",
+               "-ar", str(osr), "-"]
+        data = np.frombuffer(subprocess.run(cmd, capture_output=True).stdout, dtype=np.float32)
+        data = data[: (len(data) // CH) * CH].reshape(-1, CH)
+        if len(data) == 0:
+            break
+        spots += [(start + t, a) for t, a in _spots(data, osr, threshold, merge_s)]
+        if len(data) < chunk_s * osr * 0.999:
+            break
+        start += chunk_s
+    return [t for t, _ in _merge_spots(spots, merge_s)]

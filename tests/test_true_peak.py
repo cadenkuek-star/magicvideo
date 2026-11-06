@@ -31,8 +31,9 @@ def test_apply_dips_shape():
     assert 0.6 < x[c - half // 2, 0] < 1.0              # raised cosine, not a constant gain
     y = np.ones((10000, 2), np.float32)
     A.apply_dips(y, sr, [0.5, 0.505], dip, win_ms)       # overlapping: minimum, not product
-    assert y[c, 0] >= 10 ** (-dip / 20) - 1e-6
-    assert y[c + 25, 0] == pytest.approx(10 ** (-dip / 20), abs=1e-6)
+    assert y[c, 0] == pytest.approx(10 ** (-dip / 20), abs=1e-6)
+    assert y[c + 5, 1] == pytest.approx(10 ** (-dip / 20), abs=1e-6) or y[c + 5, 1] >= 10 ** (-dip / 20)
+    assert y[c + 50, 0] == pytest.approx(10 ** (-dip / 20), abs=1e-6)
     z = np.ones((100, 2), np.float32)
     A.apply_dips(z, sr, [0.0, 0.0099], dip, win_ms)      # clipped to the array bounds
     assert z.shape == (100, 2)

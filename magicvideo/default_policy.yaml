@@ -158,6 +158,11 @@ audio:
   true_peak_dbtp: -1.5
   aac_bitrate: 192k
   dialogue_match_max_db: 3.0
+  post_encode_check: true         # measure true peak on the encoded master; repair overshoots locally
+  post_encode_max_passes: 3
+  post_encode_margin_db: 0.3      # aim this far below true_peak_dbtp
+  post_encode_dip_win_ms: 40      # width of each local gain dip
+  post_encode_global_max_db: 0.8  # if no overshoot spot can be found, lower everything by at most this
 
 color:
   luts: {}                       # e.g. {"d-log-m": "C:/Travel/luts/DJI_DLogM_to_Rec709.cube"}

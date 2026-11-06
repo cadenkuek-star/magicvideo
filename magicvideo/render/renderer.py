@@ -191,6 +191,68 @@ class Renderer:
         return wav, loud
 
     # ------------------------------------------------------------------ main
+    def _encode_master(self, wav: Path, mvid: Path, out: Path) -> None:
+        sr = int(self.policy("audio.sample_rate"))
+        abr = str(self.policy("audio.aac_bitrate"))
+        ffmpeg.run(["-y", "-v", "error", "-i", str(mvid), "-i", str(wav), "-map", "0:v:0", "-map", "1:a:0",
+                    "-c:v", "copy", "-c:a", "aac", "-b:a", abr, "-ar", str(sr), "-ac", "2",
+                    "-metadata", f"title={self.timeline['name']}", "-movflags", "+faststart", str(out)])
+
+    def _encode_verified(self, wav: Path, mvid: Path, master_path: Path) -> dict:
+        """Encode the master; measure true peak on the encoded file and repair overshoots locally."""
+        pol = self.policy
+        sr = int(pol("audio.sample_rate"))
+        lim = float(pol("audio.true_peak_dbtp"))
+        target_i = float(pol("audio.integrated_lufs"))
+        try_path = self.work / "master_try.mp4"
+        log = {"passes": 1, "tp_first": None, "tp_final": None, "dips": [], "global_db": 0.0, "note": "ok"}
+        self._encode_master(wav, mvid, try_path)
+        if pol("audio.post_encode_check"):
+            tp = A.measure(try_path, sr, False, target_i, lim)["TP"]
+            log["tp_first"] = log["tp_final"] = tp
+            max_passes = int(pol("audio.post_encode_max_passes"))
+            while tp > lim and log["passes"] < max_passes:
+                excess = tp - lim + float(pol("audio.post_encode_margin_db"))
+                times = A.scan_true_peaks(try_path, sr, 10 ** (lim / 20))
+                if times:
+                    self._dip_wav(wav, sr, times, excess)
+                    log["dips"] = sorted(set(log["dips"]) | {round(t, 3) for t in times})
+                elif excess <= float(pol("audio.post_encode_global_max_db")):
+                    tmp = wav.with_name(wav.stem + "_g.wav")
+                    ffmpeg.run(["-y", "-v", "error", "-i", str(wav), "-af", f"volume=-{excess:.3f}dB",
+                                "-c:a", "pcm_f32le", str(tmp)])
+                    os.replace(tmp, wav)
+                    log["global_db"] = round(log["global_db"] + excess, 3)
+                else:
+                    break
+                self._encode_master(wav, mvid, try_path)
+                tp = A.measure(try_path, sr, False, target_i, lim)["TP"]
+                log["passes"] += 1
+                log["tp_final"] = tp
+            if tp > lim:
+                log["note"] = "gave up: TP still above limit"
+            elif log["passes"] > 1:
+                log["note"] = "repaired"
+        os.replace(try_path, master_path)
+        self.log.setdefault("loudness", {})["post_encode"] = log
+        return log
+
+    def _dip_wav(self, wav: Path, sr: int, times: list[float], dip_db: float) -> None:
+        """Apply local gain dips to the wav through a memory map (never loads the whole file)."""
+        raw = wav.with_suffix(".f32")
+        ffmpeg.run(["-y", "-v", "error", "-i", str(wav), "-f", "f32le", "-ac", "2", "-ar", str(sr), str(raw)])
+        n = raw.stat().st_size // 8
+        if n:
+            mm = np.memmap(raw, dtype=np.float32, mode="r+", shape=(n, 2))
+            A.apply_dips(mm, sr, times, dip_db, float(self.policy("audio.post_encode_dip_win_ms")))
+            mm.flush()
+            del mm
+        tmp = wav.with_name(wav.stem + "_d.wav")
+        ffmpeg.run(["-y", "-v", "error", "-f", "f32le", "-ar", str(sr), "-ac", "2", "-i", str(raw),
+                    "-c:a", "pcm_f32le", str(tmp)])
+        os.replace(tmp, wav)
+        raw.unlink(missing_ok=True)
+
     def run(self) -> dict:
         master_path = self.out_dir / f"{self.name}_{self.tag}.mp4"
         if master_path.exists():
@@ -238,9 +300,7 @@ class Renderer:
         sr = int(self.policy("audio.sample_rate"))
         abr = str(self.policy("audio.aac_bitrate"))
         self.out_dir.mkdir(parents=True, exist_ok=True)
-        ffmpeg.run(["-y", "-v", "error", "-i", str(mvid), "-i", str(wav), "-map", "0:v:0", "-map", "1:a:0",
-                    "-c:v", "copy", "-c:a", "aac", "-b:a", abr, "-ar", str(sr), "-ac", "2",
-                    "-metadata", f"title={self.timeline['name']}", "-movflags", "+faststart", str(master_path)])
+        self._encode_verified(wav, mvid, master_path)
         outputs = {"master": str(master_path), "chapters": []}
         if self.policy("output.chapters"):
             cdir = self.out_dir / "chapters"
