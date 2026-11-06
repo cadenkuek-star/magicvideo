@@ -15,6 +15,10 @@ ALL_STEPS = ["quality", "asr", "voices", "faces", "tags"]
 AWAITING_AGENT = "skipped: awaiting agent tags"
 
 
+def _asr_language(policy) -> str | None:
+    return policy("compute.asr_language") or None
+
+
 def _done(status: str | None) -> bool:
     return bool(status) and (status == "done" or status.startswith("skipped:"))
 
@@ -85,7 +89,7 @@ def run_analysis(project: Project, steps: list[str] | None = None, force: bool =
                         continue
                     backend("asr")
                     wav = ffmpeg.extract_audio(Path(clip["render_path"]), adir / "audio16k.wav")
-                    write_json(adir / "transcript.json", asr.transcribe(wav, policy))
+                    write_json(adir / "transcript.json", asr.transcribe(wav, policy, language=_asr_language(policy)))
                 elif step == "voices":
                     tr = read_json(adir / "transcript.json")
                     if tr is None:

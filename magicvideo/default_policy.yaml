@@ -8,6 +8,7 @@ trip:
 compute:
   device: auto                   # auto | cuda | cpu
   asr_model: large-v3            # CPU fallback: consider "medium" for speed
+  asr_language: null             # e.g. yue for Cantonese; null = auto-detect. Re-run analyze --force --steps asr to apply
   asr_compute_type: auto         # auto -> float16 on GPU, int8 on CPU
 
 cloud:                           # scene tagging only; nothing else ever leaves the machine
