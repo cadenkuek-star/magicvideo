@@ -17,12 +17,13 @@ from urllib.parse import unquote, urlsplit
 
 import yaml
 
+from .localserver import BaseHandler, make_loopback_server
 from .plan.planner import run_plan, stale_refs, warn_if_stale
 from .project import Project, ProjectError
 from .util import latest_version, read_json, version_of, vtag
 
 VALUES = ("keep", "drop", "couple", "clear")
-MAX_BODY = 1 << 20
+THUMB_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
 
 def _latest_tag(project: Project) -> str:
@@ -69,30 +70,8 @@ class _State:
 
 
 def _handler(state: _State):
-    class Handler(BaseHTTPRequestHandler):
+    class Handler(BaseHandler):
         server_version = "magicvideo-review"
-
-        def log_message(self, fmt, *args):  # keep the console quiet
-            pass
-
-        # ---- helpers
-        def _send(self, status: int, body: bytes, ctype: str) -> None:
-            self.send_response(status)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
-
-        def _json(self, status: int, obj) -> None:
-            self._send(status, json.dumps(obj, sort_keys=True).encode("utf-8"), "application/json")
-
-        def _error(self, status: int, message: str) -> None:
-            self._json(status, {"ok": False, "error": message})
-
-        def _host_ok(self) -> bool:
-            port = self.server.server_address[1]
-            return self.headers.get("Host") in (f"127.0.0.1:{port}", f"localhost:{port}")
 
         # ---- GET
         def do_GET(self) -> None:  # noqa: N802
@@ -116,33 +95,16 @@ def _handler(state: _State):
             return self._error(404, "not found")
 
         def _thumb(self, name: str) -> None:
-            base = (state.project.plan_dir / "thumbs").resolve()
-            try:
-                target = (base / name).resolve()
-                inside = target.is_relative_to(base) and target.is_file()
-            except (OSError, ValueError):
-                inside = False
-            if not inside:
-                return self._error(404, "not found")
-            ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-            self._send(200, target.read_bytes(), ctype)
+            self.serve_file(state.project.plan_dir / "thumbs", name, THUMB_SUFFIXES)
 
         # ---- POST
         def do_POST(self) -> None:  # noqa: N802
             if not self._host_ok():
                 return self._error(403, "forbidden host")
-            if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
-                return self._error(415, "Content-Type must be application/json")
             path = urlsplit(self.path).path
-            try:
-                length = int(self.headers.get("Content-Length") or 0)
-                if length < 0 or length > MAX_BODY:
-                    raise ValueError
-                body = json.loads(self.rfile.read(length) or b"{}")
-                if not isinstance(body, dict):
-                    raise ValueError
-            except ValueError:
-                return self._error(400, "bad JSON body")
+            body = self._read_json_body()
+            if body is None:
+                return
             try:
                 if path == "/api/moment":
                     return self._moment(body)
@@ -187,7 +149,7 @@ def make_server(project: Project, version: str | None = None, port: int | None =
         port = int(project.policy("review.port"))
     if version is None:
         _latest_tag(project)  # fail early when there is no plan
-    return ThreadingHTTPServer(("127.0.0.1", port), _handler(_State(project, version)))
+    return make_loopback_server(_handler(_State(project, version)), port)
 
 
 def serve(project: Project, version: str | None = None, port: int | None = None, open_browser: bool = True) -> None:
