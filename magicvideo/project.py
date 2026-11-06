@@ -11,7 +11,8 @@ from .util import read_json, safe_name, write_json
 
 OVERRIDES_TEMPLATE = """\
 # Review decisions. IDs come from plan/storyboard_vNNN.html.
-# moments:   {<moment_id>: drop | keep | {extend_start_s: 1.0, extend_end_s: 2.0}}
+# moments:   {<moment_id>: drop | keep | couple | {extend_start_s: 1.0, extend_end_s: 2.0}}
+#            couple = this is us: count as couple time
 # events:    {<event_id>: {coverage_budget_s: 60}}
 # clips:     {<clip_id>: {exclude: true, rotate: 90}}
 moments: {}
