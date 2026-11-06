@@ -70,6 +70,12 @@ def cmd_plan(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_review(a: argparse.Namespace) -> int:
+    from . import review
+    review.serve(Project(Path(a.work)), a.plan, a.port, open_browser=not a.no_open)
+    return 0
+
+
 def cmd_render(a: argparse.Namespace) -> int:
     from .plan.planner import warn_if_stale
     from .render.renderer import Renderer
@@ -129,6 +135,11 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("plan")
     s.add_argument("work"); s.add_argument("--thumbs", action="store_true", help="add thumbnails to the storyboard")
     s.set_defaults(fn=cmd_plan)
+    s = sub.add_parser("review")
+    s.add_argument("work"); s.add_argument("--plan", help="plan version, e.g. v002 (default: latest)")
+    s.add_argument("--port", type=int, help="port (default: policy review.port, 8765)")
+    s.add_argument("--no-open", action="store_true", help="do not open the browser")
+    s.set_defaults(fn=cmd_review)
     s = sub.add_parser("render")
     s.add_argument("work"); s.add_argument("--plan", help="plan version, e.g. v002 (default: latest)")
     s.set_defaults(fn=cmd_render)

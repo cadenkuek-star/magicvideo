@@ -21,6 +21,8 @@ def apply_overrides(moments: list[Moment], clips: dict[str, ClipData], overrides
             m.t0 = max(0.0, m.t0 - float(rule.get("extend_start_s", 0.0)))
             m.t1 = min(dur, m.t1 + float(rule.get("extend_end_s", 0.0)))
             m.abs_t0 = clips[m.clip_id].abs_start + m.t0
+        elif rule == "couple":  # "this is us": the moment counts as couple time, not as other people
+            m.cls = "couple"
 
 
 def _override(m: Moment, overrides: dict) -> str | None:
@@ -71,7 +73,9 @@ def select_event(ev: Event, moments: list[Moment], clips: dict[str, ClipData], p
     ev.couple_time = sum(eff_len(m) for m in moments if m.selected)
 
     # 2. third-party, best first, within budget
-    tp = [m for m in moments if m.cls == "third_party" and m.kind in ("third_party", "coverage")]
+    # a third-party moment the owner marked "couple" has cls couple by now; it is still handled here, like "keep"
+    tp = [m for m in moments if m.kind in ("third_party", "coverage")
+          and (m.cls == "third_party" or (m.kind == "third_party" and _override(m, overrides) == "couple"))]
     for m in tp:
         if m.kind == "third_party":  # score on the full moment, then keep the best excerpt
             m.score = _third_party_score(m, clips[m.clip_id], policy)
@@ -82,21 +86,23 @@ def select_event(ev: Event, moments: list[Moment], clips: dict[str, ClipData], p
         if rule == "drop":
             m.reason = "dropped in review"
             continue
-        if rule == "keep" or used + eff_len(m) <= tp_budget:
-            m.selected, m.reason = True, "third-party excerpt" + (" (kept in review)" if rule == "keep" else "")
+        keep = rule in ("keep", "couple")
+        if keep or used + eff_len(m) <= tp_budget:
+            m.selected, m.reason = True, "third-party excerpt" + (" (kept in review)" if keep else "")
             used += eff_len(m)
         else:
             m.reason = "over third-party budget"
     ev.third_party_used = used
 
     # 3. coverage via MMR (quality x novelty) up to the event budget
-    cands = [m for m in moments if m.kind == "coverage" and m.cls in ("coverage", "transit") and m.max_len != 0.0]
+    cands = [m for m in moments if m.kind == "coverage" and m.max_len != 0.0
+             and (m.cls in ("coverage", "transit") or _override(m, overrides) == "couple")]
     lam = float(policy("coverage.mmr_lambda"))
     max_sim = float(policy("coverage.max_similarity"))
     chosen_desc: list[np.ndarray] = []
     used = 0.0
     descs = {m.id: clips[m.clip_id].quality.desc_at(m.t0, m.t1) for m in cands}
-    forced = [m for m in cands if _override(m, overrides) == "keep"]
+    forced = [m for m in cands if _override(m, overrides) in ("keep", "couple")]
     for m in forced:
         m.selected, m.reason = True, "coverage (kept in review)"
         used += eff_len(m)

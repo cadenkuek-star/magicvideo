@@ -20,6 +20,9 @@ cloud:                           # scene tagging only; nothing else ever leaves 
   frames_per_request: 9          # sent as one labelled 3x3 grid
   frame_interval_s: 3.0
 
+review:
+  port: 8765                      # `magicvideo review` listens on 127.0.0.1 only
+
 analysis:
   steps: [quality, asr, voices, faces, tags]
 

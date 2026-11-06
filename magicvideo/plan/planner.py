@@ -13,7 +13,7 @@ from .budget import eff_len, select_all
 from .data import ClipData, load_clip
 from .events import build_chapters, build_events
 from .moments import build_clip_moments
-from .storyboard import write_storyboard
+from .storyboard import STALE_REFS_TEXT, write_storyboard
 
 
 def plannable_clips(project: Project, warnings: list[str]) -> list[dict]:
@@ -80,9 +80,6 @@ def make_plan(project: Project) -> dict:
         "moments": [m.to_dict() for m in moments],
     }
     return {"plan": plan, "timeline": timeline}
-
-
-STALE_REFS_TEXT = "Your partner references changed after this plan was made. Run magicvideo plan again."
 
 
 def stale_refs(project: Project, plan: dict) -> bool:

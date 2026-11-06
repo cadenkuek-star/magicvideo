@@ -132,7 +132,7 @@ def test_foreign_host_rejected(served):
     assert _call(srv, "/api/overrides", headers={"Host": "127.0.0.1:1"})[0] == 403
     assert _call(srv, "/api/moment", {"id": M1, "value": "keep"}, headers={"Host": f"evil.example:{port}"})[0] == 403
     assert _call(srv, "/api/overrides", headers={"Host": f"localhost:{port}"})[0] == 200
-    assert "keep" not in (p.root / "overrides.yaml").read_text(encoding="utf-8")
+    assert _overrides_file(p)["moments"] == {}
 
 
 def test_server_binds_loopback(served):
