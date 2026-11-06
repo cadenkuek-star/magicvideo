@@ -18,11 +18,17 @@ from .project import Project, ProjectError
 from .util import read_json, safe_name, sha256_file, write_json
 
 REVIEW_TEXT = """\
-# Who are the two of you?  (takes ~5 minutes, once)
+# Who are the two of you?  (takes ~2 minutes, once)
 
 This folder has candidate PEOPLE (faces/review/{trip}/person_NNN) and VOICES
 (voices/review/{trip}/voice_NNN) found in your footage.
 
+## Easiest: the clickable page (nothing is deleted)
+Run:   magicvideo enroll "{work}" --page
+Tap A or B on each group that is one of you, and Not us on the others. Tap a photo or clip to leave it out if it
+is someone else. Then press Finish. If one of you hardly speaks, tick "Accept fewer clips than usual".
+
+## Alternative: delete folders yourself
 1. Faces: open each person_NNN folder. Delete every folder that is not one of you two.
    Inside your two folders, delete any image of somebody else. Keep at least {min_face} images each.
 2. Voices: play the clips in each voice_NNN folder. Delete every folder that is not one of you two.

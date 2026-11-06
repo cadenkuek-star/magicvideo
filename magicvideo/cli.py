@@ -56,6 +56,10 @@ def cmd_analyze(a: argparse.Namespace) -> int:
 def cmd_enroll(a: argparse.Namespace) -> int:
     from . import enroll
     p = Project(Path(a.work))
+    if a.page:
+        from . import enroll_page
+        enroll_page.serve(p, a.port, open_browser=not a.no_open)
+        return 0
     if a.finalize:
         report = enroll.finalize(p, merges=a.merge, allow_sparse=a.allow_sparse)
         for k, v in report.items():
@@ -66,6 +70,7 @@ def cmd_enroll(a: argparse.Namespace) -> int:
     r = enroll.prepare(p)
     print(f"{r['faces']} face candidates, {r['voices']} voice candidates exported to {p.people_dir}")
     print(f"follow {p.people_dir / ('REVIEW_' + p.name + '.md')}, then run: magicvideo enroll \"{p.root}\" --finalize")
+    print(f"next: magicvideo enroll \"{p.root}\" --page")
     return 0
 
 
@@ -165,6 +170,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--merge", action="append", default=[], metavar="SRC:DST",
                    help="with --finalize: count the files of folder SRC under partner folder DST "
                         "(for example voice_003:voice_001); repeatable")
+    s.add_argument("--page", action="store_true", help="open the clickable enrollment page (nothing is deleted)")
+    s.add_argument("--port", type=int, help="with --page: port (default: policy enrollment.page_port, 8766)")
+    s.add_argument("--no-open", action="store_true", help="with --page: do not open the browser")
     s.add_argument("--allow-sparse", action="store_true",
                    help="with --finalize: accept a partner with fewer files than the minimum (down to 1)")
     s.set_defaults(fn=cmd_enroll)

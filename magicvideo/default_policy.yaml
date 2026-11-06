@@ -78,6 +78,7 @@ enrollment:
   max_candidates: 8
   samples_per_candidate: {face: 12, voice: 8}
   min_kept_per_partner: {face: 4, voice: 3}
+  page_port: 8766                # `magicvideo enroll <work> --page` listens on 127.0.0.1 only
 
 moments:
   edge_speech: {start_s: 0.3, end_s: 1.5, camera_originals: false}   # warn if couple speech starts/ends this close to a clip edge; camera_originals: false = camera-named originals can't be trimmed too tight
