@@ -412,3 +412,13 @@ Source: `docs/R4_BRIEF.md`. Where this section differs from earlier sections, th
 **Edge warnings.** `moments.edge_speech.camera_originals` (false): clips whose `capture_source` is `filename` (camera-named originals) get no edge warning unless it is true.
 
 **Console.** `cli._utf8_console` reconfigures stdout/stderr to UTF-8 (`errors="replace"`), called first in `main`.
+
+## 13. Round 5 changes
+
+Source: `docs/R5_BRIEF.md`. Where this section differs from earlier sections, this section wins.
+
+**Signal-based speech check.** With `qc.signal_check` (true), `speech.partner_words_rendered` compares the master audio with the source audio for every planned partner word, independent of language. `qc/runner.py::collect_planned_word_spans` lists the words with source and master times and segment ids; `word_present` returns `(present, best_corr, level_db)` using zero-mean normalised correlation over lags within `qc.signal_max_lag_s`, and requires `best_corr >= qc.signal_min_corr` and a master level (relative to the source, after the known gains: dialogue gain of the segment, `loudness.gain_db`, minus `post_encode.global_db`) of at least `qc.signal_min_level_db`; `signal_word_presence` decodes per segment (mono, `qc.signal_sr`), never the whole master. PASS when the present ratio is at least `qc.rendered_signal_match_min` (0.98). The speech report `qc/<master stem>_speech.json` gains `signal` (`present`, `total`, `ratio`, `absent_runs`, `words`).
+
+**Whisper is information only.** With `qc.asr_crosscheck` (true) the per-language Whisper comparison still runs when available; its ratio is appended to the detail as information, and an error is recorded in the report as `asr.error` without changing the status. With `qc.signal_check: false` the Round 4 behaviour (Whisper decides) applies unchanged.
+
+**ASR language.** `compute.asr_language` (null = auto-detect; e.g. `yue`) is passed to Whisper by `analyze`; re-run `analyze --force --steps asr` to apply. The QC spans use the language stored in each transcript.
