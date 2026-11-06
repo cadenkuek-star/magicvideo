@@ -57,6 +57,16 @@ def _thumb(project, clip: dict, m: dict, out_dir: Path) -> str | None:
     return out.name
 
 
+def _identity_line(project, ident: dict) -> str:
+    needs = float(project.policy("identity.voice.min_similarity"))
+    line = (f"voice match {ident['voice_best']:.2f} (needs {needs:.2f}) · "
+            f"stranger on screen: {'yes' if ident['stranger_on_screen'] else 'no'}")
+    n = int(ident.get("assumed_couple", 0))
+    if n:
+        line += f" · treated as you two ({n} window{'s' if n != 1 else ''})"
+    return line
+
+
 def write_storyboard(project, plan: dict, timeline: dict, path: Path, thumbs: bool = False) -> Path:
     clips = {c["clip_id"]: c for c in project.inventory()}
     thumb_dir = path.parent / "thumbs"
@@ -97,6 +107,8 @@ def write_storyboard(project, plan: dict, timeline: dict, path: Path, thumbs: bo
                     f"<div class=meta>{html.escape(clip.get('rel_path', m['clip_id']))} · "
                     f"{m['t0']:.1f}–{m['t1']:.1f}s ({m['dur']:.1f}s)</div>"
                     f"<div class=meta>{html.escape(m['reason'])}</div>"
+                    + (f"<div class=meta>{html.escape(_identity_line(project, m['identity']))}</div>"
+                       if m.get("identity") else "")
                     + (f"<div class=text>“{html.escape(text)}”</div>" if text else "")
                     + (f"<div class=text>{html.escape(m['desc'])}</div>" if m.get("desc") else "")
                     + f"<div class=btns><button class=k onclick=\"pick('{mid}','keep')\">keep</button>"

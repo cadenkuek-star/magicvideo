@@ -4,11 +4,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import bisect
+
 import numpy as np
 
-from ..analysis.faces import label_faces
+from ..analysis.faces import label_faces, stranger_times
 from ..analysis.quality import QualityTrack
-from ..analysis.voices import OTHER, PARTNER_A, PARTNER_B, UNKNOWN, build_windows, label_windows
+from ..analysis.voices import (COUPLE, OTHER, PARTNER_A, PARTNER_B, UNKNOWN, build_windows, label_windows,
+                               window_best_scores)
 from ..policy import Policy
 from ..util import read_json
 from .model import Turn, abs_seconds
@@ -27,6 +30,7 @@ class ClipData:
     quality: QualityTrack = field(default_factory=lambda: QualityTrack({}))
     tags: list[dict] = field(default_factory=list)
     asr_done: bool = False
+    window_evidence: list[dict] = field(default_factory=list)
 
     @property
     def id(self) -> str:
@@ -122,13 +126,23 @@ def load_clip(project, clip: dict, refs: dict | None, policy: Policy) -> ClipDat
     else:
         windows = build_windows(cd.words, float(policy("voice.window_gap_s")), float(policy("voice.window_max_s")))
         emb = np.zeros((0, 192), np.float32)
-    labels = label_windows(emb, windows, refs, policy) if len(emb) == len(windows) else [UNKNOWN] * len(windows)
-    cd.turns = build_turns(cd.words, windows, labels, float(policy("moments.conversation.join_gap_s")))
     fj = read_json(adir / "faces.json")
+    face_emb = None
     if fj is not None and (adir / "face_emb.npy").exists():
         cd.face_dets = fj["dets"]
         cd.face_fps = float(fj.get("sample_fps") or 2.0)
-        cd.face_labels = label_faces(cd.face_dets, np.load(adir / "face_emb.npy"), refs, policy)
+        face_emb = np.load(adir / "face_emb.npy")
+        cd.face_labels = label_faces(cd.face_dets, face_emb, refs, policy)
+    matched = len(emb) == len(windows)
+    raw = label_windows(emb, windows, refs, policy) if matched else [UNKNOWN] * len(windows)
+    stranger_ts = stranger_times(cd.face_dets, face_emb, refs, policy) if face_emb is not None else []
+    labels = apply_couple_prior(windows, raw, stranger_ts, policy)
+    best = window_best_scores(emb, refs) if matched else np.zeros(len(windows), np.float32)
+    pad = float(policy("identity.stranger_face.pad_s"))
+    cd.window_evidence = [{"t0": round(float(w["t0"]), 3), "t1": round(float(w["t1"]), 3), "raw": r, "label": lab,
+                           "voice_best": round(float(v), 3), "stranger": _stranger_near(w, stranger_ts, pad)}
+                          for w, r, lab, v in zip(windows, raw, labels, best)]
+    cd.turns = build_turns(cd.words, windows, labels, float(policy("moments.conversation.join_gap_s")))
     qj = read_json(adir / "quality.json")
     if qj is not None:
         desc = np.load(adir / "visual_desc.npy") if (adir / "visual_desc.npy").exists() else None
@@ -139,10 +153,25 @@ def load_clip(project, clip: dict, refs: dict | None, policy: Policy) -> ClipDat
     return cd
 
 
+def _stranger_near(w: dict, stranger_ts: list[float], pad: float) -> bool:
+    """True when some stranger time t satisfies w.t0 - pad <= t <= w.t1 + pad (stranger_ts sorted ascending)."""
+    i = bisect.bisect_left(stranger_ts, w["t0"] - pad)
+    return i < len(stranger_ts) and stranger_ts[i] <= w["t1"] + pad
+
+
+def apply_couple_prior(windows: list[dict], labels: list[str], stranger_ts: list[float], policy: Policy) -> list[str]:
+    """Unmatched speech (OTHER) becomes COUPLE unless a stranger's face is on screen near the window."""
+    if not policy("identity.couple_prior"):
+        return labels
+    pad = float(policy("identity.stranger_face.pad_s"))
+    ts = sorted(stranger_ts)
+    return [COUPLE if lab == OTHER and not _stranger_near(w, ts, pad) else lab for w, lab in zip(windows, labels)]
+
+
 def is_couple_speaker(speaker: str, policy: Policy) -> bool:
-    if speaker in PARTNERS:
+    if speaker in PARTNERS or speaker == COUPLE:
         return True
     return speaker == UNKNOWN and bool(policy("identity.unknown_speech_is_couple"))
 
 
-__all__ = ["ClipData", "build_turns", "load_clip", "is_couple_speaker", "PARTNERS", "OTHER", "UNKNOWN"]
+__all__ = ["ClipData", "build_turns", "load_clip", "is_couple_speaker", "apply_couple_prior", "PARTNERS", "OTHER", "UNKNOWN"]

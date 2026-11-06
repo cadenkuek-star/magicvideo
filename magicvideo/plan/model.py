@@ -16,7 +16,7 @@ def abs_seconds(iso_local: str) -> float:
 class Turn:
     t0: float
     t1: float
-    speaker: str      # PARTNER_A | PARTNER_B | OTHER | UNKNOWN
+    speaker: str      # PARTNER_A | PARTNER_B | OTHER | UNKNOWN | COUPLE
     w0: int
     w1: int
 
@@ -43,6 +43,7 @@ class Moment:
     selected: bool = False
     reason: str = ""
     max_len: float | None = None  # cap (e.g. silent solo shot)
+    identity: dict = field(default_factory=dict)  # speaker-identity evidence (voice score, stranger, assumed couple)
 
     @property
     def dur(self) -> float:

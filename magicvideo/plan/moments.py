@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..analysis.tags import TYPE_OF_TAG, event_type
+from ..analysis.voices import COUPLE, OTHER
 from ..policy import Policy
 from ..util import merge_intervals, subtract_intervals
 from .data import PARTNERS, ClipData, is_couple_speaker
@@ -51,6 +52,16 @@ def _chains(turns: list[Turn], include, join_gap: float) -> list[list[Turn]]:
     return out
 
 
+def _identity(cd: ClipData, t0: float, t1: float) -> dict:
+    """Speaker-identity evidence from the voice windows overlapping [t0, t1] (empty when there is none)."""
+    ev = [w for w in cd.window_evidence if w["t1"] > t0 and w["t0"] < t1]
+    if not ev:
+        return {}
+    return {"voice_best": round(max(w["voice_best"] for w in ev), 3),
+            "stranger_on_screen": any(w["stranger"] for w in ev),
+            "assumed_couple": sum(1 for w in ev if w["raw"] == OTHER and w["label"] == COUPLE)}
+
+
 def conversations(cd: ClipData, policy: Policy) -> list[Moment]:
     p = "moments.conversation."
     join_gap = float(policy(p + "join_gap_s"))
@@ -82,7 +93,8 @@ def conversations(cd: ClipData, policy: Policy) -> list[Moment]:
             out.append(Moment(id=moment_id(cd.id, "conversation", t0), clip_id=cd.id, kind="conversation",
                               t0=t0, t1=t1, abs_t0=cd.abs_start + t0, speakers=speakers, words=b - a,
                               partner_words=partner_words, pauses=pauses, cls="couple",
-                              partners_visible=cd.partners_visible(t0, t1), score=1.0))
+                              partners_visible=cd.partners_visible(t0, t1), score=1.0,
+                              identity=_identity(cd, t0, t1)))
     return out
 
 
@@ -96,7 +108,8 @@ def third_party(cd: ClipData, occupied: list[tuple[float, float]], policy: Polic
         t1 = min(cd.duration, chain[-1].t1 + 1.0)
         out.append(Moment(id=moment_id(cd.id, "third_party", t0), clip_id=cd.id, kind="third_party",
                           t0=t0, t1=t1, abs_t0=cd.abs_start + t0, speakers=sorted({t.speaker for t in chain}),
-                          words=chain[-1].w1 - chain[0].w0, cls="third_party"))
+                          words=chain[-1].w1 - chain[0].w0, cls="third_party",
+                          identity=_identity(cd, t0, t1)))
     return out
 
 

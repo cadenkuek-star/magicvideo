@@ -35,6 +35,11 @@ quality:
 
 identity:
   unknown_speech_is_couple: true # without voice refs, treat speech as couple speech (safe default)
+  couple_prior: true            # couple trip: speech is the couple's unless a stranger is on screen
+  stranger_face:
+    max_similarity: 0.20        # face scores below this against BOTH partner refs = a stranger
+    min_q: 0.5                  # only clear faces count
+    pad_s: 1.0                  # look this far before/after a speech window
   face:
     backend: insightface         # insightface | yunet
     sample_fps: 2

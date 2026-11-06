@@ -169,3 +169,17 @@ def label_faces(dets: list[dict], emb: np.ndarray, refs: dict | None, policy: Po
         for i in idx:
             labels[i] = lab
     return labels
+
+
+def stranger_times(dets: list[dict], emb: np.ndarray, refs: dict | None, policy: Policy) -> list[float]:
+    """Times of clear faces that match neither partner (similarity below stranger_face.max_similarity)."""
+    if not refs or refs.get("face_a") is None or refs.get("face_b") is None or not dets or len(emb) != len(dets):
+        return []
+    a = np.asarray(refs["face_a"], np.float32)
+    b = np.asarray(refs["face_b"], np.float32)
+    if a.shape[0] != emb.shape[1] or b.shape[0] != emb.shape[1]:
+        return []
+    best = np.maximum(emb @ a, emb @ b)
+    max_sim = float(policy("identity.stranger_face.max_similarity"))
+    min_q = float(policy("identity.stranger_face.min_q"))
+    return sorted(float(d["t"]) for d, s in zip(dets, best) if float(d.get("q", 0.0)) >= min_q and float(s) < max_sim)

@@ -12,6 +12,7 @@ from ..policy import Policy
 from .asr import BackendMissing
 
 PARTNER_A, PARTNER_B, OTHER, UNKNOWN = "PARTNER_A", "PARTNER_B", "OTHER", "UNKNOWN"
+COUPLE = "COUPLE"   # unmatched speech assumed to be the couple (no stranger on screen)
 
 
 def build_windows(words: list[dict], gap: float, max_len: float) -> list[dict]:
@@ -107,6 +108,24 @@ def embed_windows(audio16k: Path, windows: list[dict], policy: Policy, batch: in
     return emb / (np.linalg.norm(emb, axis=1, keepdims=True) + 1e-9)
 
 
+def _partner_scores(emb: np.ndarray, refs: dict) -> tuple[np.ndarray, np.ndarray]:
+    """Per-window similarity to partner A and partner B (centroid scoring)."""
+    a = np.asarray(refs["voice_a"], np.float32)
+    b = np.asarray(refs["voice_b"], np.float32)
+    return emb @ a, emb @ b
+
+
+def window_best_scores(emb: np.ndarray, refs: dict | None) -> np.ndarray:
+    """Per window max(score_a, score_b), scored exactly as label_windows does. Zeros when refs are unusable."""
+    n = len(emb)
+    if not refs or refs.get("voice_a") is None or refs.get("voice_b") is None or n == 0:
+        return np.zeros(n, np.float32)
+    if np.asarray(refs["voice_a"]).shape[0] != emb.shape[1] or np.asarray(refs["voice_b"]).shape[0] != emb.shape[1]:
+        return np.zeros(n, np.float32)
+    sa, sb = _partner_scores(emb, refs)
+    return np.maximum(sa, sb).astype(np.float32)
+
+
 def label_windows(emb: np.ndarray, windows: list[dict], refs: dict | None, policy: Policy) -> list[str]:
     """PARTNER_A / PARTNER_B / OTHER per window, UNKNOWN when no voice refs exist."""
     n = len(windows)
@@ -114,9 +133,7 @@ def label_windows(emb: np.ndarray, windows: list[dict], refs: dict | None, polic
         return []
     if not refs or refs.get("voice_a") is None or refs.get("voice_b") is None or len(emb) != n:
         return [UNKNOWN] * n
-    a = np.asarray(refs["voice_a"], np.float32)
-    b = np.asarray(refs["voice_b"], np.float32)
-    sa, sb = emb @ a, emb @ b
+    sa, sb = _partner_scores(emb, refs)
     thr = float(policy("identity.voice.min_similarity"))
     margin = float(policy("identity.voice.margin"))
     labels = []
