@@ -210,7 +210,7 @@ def editorial(project: Project, plan: dict, timeline: dict, policy: Policy, mast
             n = max(1, int(s["frames"] / fps / step))
             for k in range(n):
                 t = s["src_in"] + k * step
-                heard = any(cd.word_speaker(i) in PARTNERS for i in cd.words_in(t - step, t + step)) if cd else False
+                heard = _partner_heard(cd, t, step, policy)
                 seen = bool(cd and cd.partners_visible(t - 1.0, t + 1.0, min_share=0.1))
                 run = 0.0 if (heard or seen) else run + step
                 longest = max(longest, run)
@@ -248,6 +248,13 @@ def editorial(project: Project, plan: dict, timeline: dict, policy: Policy, mast
 
 
 # --------------------------------------------------------------------------- run
+def _partner_heard(cd, t: float, step: float, policy) -> bool:
+    """True when a partner (or assumed-couple) speaker is heard within step of t."""
+    if cd is None:
+        return False
+    return any(is_couple_speaker(cd.word_speaker(i), policy) for i in cd.words_in(t - step, t + step))
+
+
 def run_qc(project: Project, version: str | None = None) -> tuple[str, Path]:
     policy = project.policy
     render_logs = sorted(project.root.glob("render/v*/render_v*.json"))
