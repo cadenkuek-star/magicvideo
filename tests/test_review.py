@@ -173,3 +173,24 @@ def test_storyboard_has_offline_download(tmp_path):
     assert 'id="download-overrides"' in page
     assert "<textarea" not in page
     assert "this is us" in page                       # shown for a third-party card
+
+
+def test_storyboard_hides_voice_match_without_refs(tmp_path):
+    from magicvideo.plan.storyboard import write_storyboard
+
+    p = _project(tmp_path)
+    p.inventory_path.write_text(json.dumps({"version": 1, "clips": []}), encoding="utf-8")
+    mom = {"id": M2, "clip_id": "c_1", "kind": "third_party", "cls": "third_party", "t0": 1.0, "t1": 4.0,
+           "abs_t0": 1.0, "dur": 3.0, "selected": True, "reason": "", "event_id": "e1", "desc": "",
+           "identity": {"stranger_on_screen": False, "assumed_couple": 0}}
+    plan = {"name": "T", "warnings": [], "chapters": [{"index": 1, "date": "2026-04-19", "name": "Day 1",
+                                                       "event_ids": ["e1"]}],
+            "events": [{"id": "e1", "label": "Lunch", "type": "meal", "couple_time": 0, "coverage_used": 0,
+                        "coverage_budget": 0, "third_party_used": 3}],
+            "stats": {"selected": 1, "moments": 1, "planned_seconds": 3, "raw_seconds": 3,
+                      "shares": {k: {"share": 0.0} for k in ("couple", "coverage", "transit", "third_party")}},
+            "moments": [mom]}
+    page = write_storyboard(p, plan, {"total_frames": 0}, p.plan_dir / "storyboard_v001.html").read_text(
+        encoding="utf-8")
+    assert "voice match" not in page
+    assert "stranger on screen: no" in page

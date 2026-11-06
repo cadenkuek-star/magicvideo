@@ -131,3 +131,13 @@ def test_stranger_times_thresholds():
     assert stranger_times(dets, emb, {"face_a": fa, "face_b": fb}, policy()) == [1.0]
     assert stranger_times(dets, emb, None, policy()) == []
     assert stranger_times([], np.zeros((0, 4), np.float32), {"face_a": fa, "face_b": fb}, policy()) == []
+
+
+def test_identity_omits_voice_without_refs():
+    ev = {"t0": 1.0, "t1": 2.0, "raw": "UNKNOWN", "label": "UNKNOWN", "voice_best": None, "stranger": False}
+    cd = clipdata(clip(duration=60), [(1.0, 2.0, "hello"), (2.5, 3.5, "there")], speakers=["COUPLE", "COUPLE"])
+    cd.window_evidence = [ev]
+    ident = conversations(cd, policy())[0].identity
+    assert "voice_best" not in ident and ident["stranger_on_screen"] is False
+    cd.window_evidence = [{**ev, "voice_best": 0.5}]
+    assert conversations(cd, policy())[0].identity["voice_best"] == 0.5
