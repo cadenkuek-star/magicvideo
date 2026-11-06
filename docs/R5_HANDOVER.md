@@ -55,3 +55,26 @@ $ git diff a4c3843..HEAD -- tests/test_qc_speech.py | grep "^-" | grep -v "^---"
 - Speed of the per-word lag search on hundreds of words.
 - Whisper `yue` quality; the ASR cross-check path through a real model.
 - The mutation list in brief section 5 was not run (reviewer's job).
+
+## Coder response R01
+
+Review `docs/R5_REVIEW.md` committed unchanged first (`8dce71b`). Same branch; nothing pushed or merged.
+
+| Ruling | Test commit | Fix commit | What changed |
+| --- | --- | --- | --- |
+| R01-1 | `ca46f28` | `af22785` | `word_present` now follows the padded contract: `m` padded by L on both sides, windows `m[k:k+len(s)]` for k in 0..2L (full windows only), level from the centre window `m[L:L+len(s)]`, corr 0 when `m` is shorter than `s` or either side is silent. `signal_word_presence` unchanged (still pads by `lag`). |
+
+Tests: the four existing `word_present` unit tests keep their names and intent, rebuilt with padded masters; added `test_word_present_finds_late_and_early_words` and `test_signal_presence_master_slightly_late`. Against the old code three tests failed (the small-lag, late/early and slightly-late ones); after the fix all pass.
+
+Full suite (run once, at the end): `113 passed in 27.95s`; `pytest --collect-only -q`: `113 tests collected` (matches the prediction).
+
+```
+$ git status --short
+(clean, taken before this section was committed)
+$ git log --oneline c906d68..HEAD   (before the handover commit)
+af22785 fix(R01-1): word_present searches the padded master window correctly
+ca46f28 test(R01-1): word_present on the padded-master contract; late/early word tests
+8dce71b docs: R5 review R01
+```
+
+Parked: none. Not verified: the real-footage run (the reviewer re-runs the harness); the lag loop is not vectorised (optional per the ruling).
