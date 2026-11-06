@@ -213,3 +213,11 @@ def test_owner_assignment_never_swapped(project, monkeypatch):
     assert np.allclose(refs["voice_a"], A) and np.allclose(refs["voice_b"][1], 1.0, atol=0.2)
     rep = enroll.finalize(project, assignment={"face": both["face"]}, excluded=set())
     assert calls == [] and rep["voice_face_link"].startswith("set by owner for faces")
+
+
+def test_media_cannot_leave_review_folder(served):
+    p, srv = served
+    (p.people_dir / "secret.jpg").write_bytes(b"secret")
+    for kind in ("face", "voice"):
+        status, body = _call(srv, f"/media/{kind}/..%2F..%2F..%2Fsecret.jpg")
+        assert status == 404 and b"secret" not in body
