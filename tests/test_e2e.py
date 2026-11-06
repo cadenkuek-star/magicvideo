@@ -92,7 +92,7 @@ def test_shaky_clip_measures_more_jitter(trip):
     assert p90("DJI_20260419090000_0003_D.MP4") > 3 * p90("DJI_20260419083601_0001_D.MP4")
 
 
-def test_plan_render_qc(trip):
+def test_plan_render_qc(trip, monkeypatch):
     paths = run_plan(trip)
     tl = json.loads(paths["timeline"].read_text())
     plan = json.loads(paths["plan"].read_text())
@@ -121,6 +121,12 @@ def test_plan_render_qc(trip):
     t = otio.adapters.read_from_file(out["otio"])
     assert [tr.name for tr in t.tracks] == ["V1", "V2 cutaways", "A1"]
 
+    from magicvideo.analysis import asr
+
+    def _no_asr(*a, **k):
+        raise asr.BackendMissing("disabled in test")
+
+    monkeypatch.setattr(asr, "transcribe", _no_asr)
     verdict, qc_path = run_qc(trip, "v001")
     checks = json.loads(qc_path.read_text())["checks"]
     failed = [c for c in checks if c["status"] == "FAIL"]
