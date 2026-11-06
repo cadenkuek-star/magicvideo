@@ -194,3 +194,22 @@ def test_names_written_to_enrollment(served):
     _post(srv, "/api/finalize", {"allow_sparse": True})
     meta = yaml.safe_load((p.people_dir / "enrollment.yaml").read_text(encoding="utf-8"))
     assert meta["names"] == {"a": "Ann", "b": "Bo"}
+
+
+def test_owner_assignment_never_swapped(project, monkeypatch):
+    from magicvideo import enroll
+
+    calls = []
+    monkeypatch.setattr(enroll, "_voice_face_swap", lambda *a: (calls.append(1), True)[1])
+    both = {"face": {"a": ["person_001"], "b": ["person_002"]},
+            "voice": {"a": ["voice_001"], "b": ["voice_002", "voice_003"]}}
+    rep = enroll.finalize(project, assignment=both, excluded=set())
+    assert calls == [] and rep["voice_face_link"] == "set by owner on the enrollment page"
+    rep = enroll.finalize(project, assignment={"voice": both["voice"]}, excluded=set())
+    assert calls == []
+    assert rep["voice_face_link"] == ("set by owner for voices on the enrollment page; "
+                                      "faces kept from before (not cross-checked)")
+    refs = dict(np.load(project.people_dir / "refs.npz"))
+    assert np.allclose(refs["voice_a"], A) and np.allclose(refs["voice_b"][1], 1.0, atol=0.2)
+    rep = enroll.finalize(project, assignment={"face": both["face"]}, excluded=set())
+    assert calls == [] and rep["voice_face_link"].startswith("set by owner for faces")
