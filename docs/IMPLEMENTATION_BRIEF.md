@@ -400,3 +400,15 @@ Source: `docs/R3_BRIEF.md`. Where this section differs from earlier sections, th
 **Insta360 from the preview.** `insta360.plan_unstitched` (default true): `plan/planner.py::filter_plannable` keeps unstitched `.insv` clips (planned from the `.lrv`) with a warning instead of skipping them. `x6_export_list(timeline, inventory, policy)` lists the unstitched clips the timeline uses, with `uses` ranges; `run_plan` writes `plan/x6_exports_<tag>.md` (only when non-empty) and adds a plan warning. `Renderer.run` raises `ProjectError` naming the files and the `.md` before creating any output. Clip ids hash the primary `.insv` path, so ids, moment ids and overrides survive when the Studio export appears.
 
 **Names.** `ingest.insta360_key` and `detect_camera` use `.search` on `_INSTA_RE` / `_DJI_RE`, so prefixed names (`026_VID_…`, `034_DJI_…`) group and detect.
+
+## 12. Round 4 changes
+
+Source: `docs/R4_BRIEF.md`. Where this section differs from earlier sections, this section wins.
+
+**True peak after encoding.** The AAC encode can create peaks the PCM master does not have, so the final encode is verified. Policy `audio.post_encode_check` (true), `post_encode_max_passes` (3), `post_encode_margin_db` (0.3), `post_encode_dip_win_ms` (40), `post_encode_global_max_db` (0.8). `Renderer._encode_verified` encodes to `master_try.mp4` in the work folder, measures true peak, and while it is above `audio.true_peak_dbtp` (and passes remain) scans the encoded file with `render/audio.py::scan_true_peaks` (4x oversampled, chunked decode) and applies raised-cosine gain dips of `excess = TP - limit + margin` dB (`apply_dips`, minimum gain where windows overlap) to the master wav through a memory map, then re-encodes and re-measures. With no overshoot spot found it lowers the wav by `excess` dB if that is at most `post_encode_global_max_db`, otherwise it stops. The chapters are encoded from the repaired wav. The result is stored as `loudness.post_encode` in the render log: `passes`, `tp_first`, `tp_final`, `dips` (3 dp), `global_db`, `note` (`ok`, `repaired`, `gave up: TP still above limit`); QC still fails honestly when it gave up. `post_encode_check: false` encodes once as before.
+
+**Per-language speech QC.** `analysis/asr.py::transcribe(path, policy, language=None)` passes `language` to Whisper. The QC takes the timeline segments that carry planned partner words, `qc/runner.py::language_spans` groups them into spans of one clip language (the `language` stored in each clip's `transcript.json`; neighbours closer than `qc.speech_span_merge_gap_s`, 2.0 s, merge), cuts each span from the master (plus 0.3 s each side), transcribes it in its own language and concatenates the heard words in film order. The speech report gains `spans`.
+
+**Edge warnings.** `moments.edge_speech.camera_originals` (false): clips whose `capture_source` is `filename` (camera-named originals) get no edge warning unless it is true.
+
+**Console.** `cli._utf8_console` reconfigures stdout/stderr to UTF-8 (`errors="replace"`), called first in `main`.
