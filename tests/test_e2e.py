@@ -97,6 +97,7 @@ def test_plan_render_qc(trip, monkeypatch):
     tl = json.loads(paths["timeline"].read_text())
     plan = json.loads(paths["plan"].read_text())
     assert tl["orientation"] == "landscape" and len(tl["chapters"]) == 2
+    assert "refs_sha256" in plan
     modes = {s["reframe"]["mode"] for s in tl["segments"] + tl["overlays"]}
     assert {"static_bg", "v360", "fill"} <= modes, modes
     assert any(o["reason"] == "cover_pause" for o in tl["overlays"]), "4 s pause should be shortened under a cutaway"
