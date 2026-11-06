@@ -189,6 +189,26 @@ def _covered(seg_spans: dict[str, list[tuple[float, float]]], clip_id: str, t: f
     return any(a <= t < b for a, b in seg_spans.get(clip_id, []))
 
 
+def collect_planned_words(convs: list[dict], cds: dict, seg_spans: dict, timeline: dict, fps: float,
+                          policy: Policy) -> tuple[int, int, list[tuple[str, float]]]:
+    """(total, kept, planned): partner words of kept conversations, planned = (word, master time) in film order."""
+    total = kept = 0
+    planned_words: list[tuple[str, float]] = []
+    for m in sorted(convs, key=lambda m: m["abs_t0"]):
+        cd = cds[m["clip_id"]]
+        for i in cd.words_in(m["t0"], m["t1"]):
+            if not is_couple_speaker(cd.word_speaker(i), policy):
+                continue
+            w = cd.words[i]
+            total += 1
+            mid = (w["t0"] + w["t1"]) / 2
+            if _covered(seg_spans, m["clip_id"], mid):
+                kept += 1
+                planned_words.append((w["w"], _master_time(timeline, fps, m["clip_id"], mid) or 0.0))
+    planned_words.sort(key=lambda x: x[1])
+    return total, kept, planned_words
+
+
 def editorial(project: Project, plan: dict, timeline: dict, policy: Policy, master: Path | None) -> list[dict]:
     out = []
     fps = float(Fraction(*timeline["fps"]))
@@ -203,21 +223,8 @@ def editorial(project: Project, plan: dict, timeline: dict, policy: Policy, mast
     cds = {cid: load_clip(project, inv[cid], refs, policy) for cid in used_clips if cid in inv}
 
     # planned partner-word retention over kept conversations
-    total = kept = 0
-    planned_words: list[tuple[str, float]] = []
     convs = [m for m in plan["moments"] if m["kind"] == "conversation" and m["selected"]]
-    for m in sorted(convs, key=lambda m: m["abs_t0"]):
-        cd = cds[m["clip_id"]]
-        for i in cd.words_in(m["t0"], m["t1"]):
-            if not is_couple_speaker(cd.word_speaker(i), policy):
-                continue
-            w = cd.words[i]
-            total += 1
-            mid = (w["t0"] + w["t1"]) / 2
-            if _covered(seg_spans, m["clip_id"], mid):
-                kept += 1
-                planned_words.append((w["w"], _master_time(timeline, fps, m["clip_id"], mid) or 0.0))
-    planned_words.sort(key=lambda x: x[1])
+    total, kept, planned_words = collect_planned_words(convs, cds, seg_spans, timeline, fps, policy)
     dropped = [m["id"] for m in plan["moments"] if m["kind"] == "conversation" and not m["selected"]]
     lim = float(policy("qc.couple_word_retention_min"))
     if total == 0:
