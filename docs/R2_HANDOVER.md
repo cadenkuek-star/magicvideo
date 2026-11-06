@@ -156,3 +156,38 @@ The relay's two `certutil` lines for `C:\Travel\.agents\skills\magicvideo\SKILL.
 - "Analyze with provider anthropic and no key records SKIPPED, no crash" (work table, W2) has no test of its own: the
   runner already turns `BackendMissing` into a skipped status and the new test covers the raise.
 - The mutation list in brief section 6 was not run (that is the reviewer's job).
+
+## Coder response R01
+
+Review `docs/R2_REVIEW.md` committed unchanged first (`bcac647`). Same branch; nothing pushed or merged.
+
+| Ruling | Test commit | Fix commit | What changed |
+| --- | --- | --- | --- |
+| R01-1 | `b3ed7e9` | `b24453f` | `select_event`: a `third_party` moment overridden to `couple` skips `_trim_excerpt`, is selected whole with reason `kept in review (this is us)`, and is not added to `used` / `third_party_used`. |
+| R01-2 | `2d3f3ce` | `2759f69` | `qc/runner.py::_partner_heard` (uses `is_couple_speaker`, False for no clip) replaces the `in PARTNERS` check in the max-gap loop. |
+| R01-3 | `a3b0a6c` | `28a2e13`, `4d7c0a6` | `voice_best` is `None` in `window_evidence` without voice refs; `_identity` omits the key then; the storyboard line prints the voice part only when present. |
+| R01-4 | none | `03e4892` | `OVERRIDES_TEMPLATE` comment lists `couple` ("couple = this is us: count as couple time"). |
+
+Slip, corrected: the R01-3 fix commit `28a2e13` accidentally deleted `_js_json` from `plan/storyboard.py` (two storyboard tests failed); `4d7c0a6` restores it byte-for-byte. The suite was run only after that.
+
+Full suite (run once, at the end): `71 passed in 19.26s`; `pytest --collect-only -q`: `71 tests collected` (matches the prediction).
+
+Self-checks:
+```
+$ git grep -n "0.0.0.0" -- magicvideo
+(empty)
+$ git status --short
+(clean, taken before this section was committed)
+$ git log --oneline 6b5c3a0..HEAD   (before the handover commit)
+4d7c0a6 fix(R01-3): restore _js_json that the previous commit removed by mistake
+03e4892 fix(R01-4): overrides template lists the couple value
+28a2e13 fix(R01-3): no voice score shown when there are no voice references
+2759f69 fix(R01-2): QC max-gap check counts COUPLE speech as partner heard
+b24453f fix(R01-1): couple-override moment is selected whole, not trimmed or budgeted
+a3b0a6c test(R01-3): no voice score without voice references
+2d3f3ce test(R01-2): COUPLE speech counts as partner heard in the QC gap check
+b3ed7e9 test(R01-1): couple override is not trimmed or budgeted
+bcac647 docs: R2 review R01
+```
+
+Parked: none. Left as is: the `PARTNERS` import in `qc/runner.py` is now unused there.
