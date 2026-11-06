@@ -85,3 +85,10 @@ def test_transcribe_passes_language(monkeypatch):
     monkeypatch.setattr(asr, "load_model", lambda policy: Stub())
     asr.transcribe("x.wav", policy(), language="en")
     assert seen["language"] == "en"
+
+
+def test_analysis_passes_policy_language():
+    from magicvideo.analysis import runner
+
+    assert runner._asr_language(policy()) is None
+    assert runner._asr_language(policy(compute={"asr_language": "yue"})) == "yue"
