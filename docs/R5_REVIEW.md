@@ -117,3 +117,30 @@ Evidence required:
 - `git log --oneline b109fc0..HEAD` and `git status --short`.
 
 Append `## Coder response R02` to `docs/R5_HANDOVER.md`.
+
+## Review R03 — 2026-11-06
+
+**Verdict: APPROVE.** Head reviewed: `cc3ac9b` (`cc3ac9b68e0d7fa5081e820caf971310055b5ab9`).
+
+### What I ran
+- Fresh clone. Full suite: **116 passed** (my run). `git status` after the run was clean. R01 and R02 of this log
+  are unchanged.
+- No production change since R02: `git diff b109fc0..HEAD -- magicvideo` is empty. The real-footage results
+  from R02 therefore stand: 458/458 on v004, and the negative controls fail.
+- The three R02 survivors are now killed:
+  - mutation 3 by `test_signal_presence_uses_dialogue_gain`;
+  - mutation 7 by `test_analysis_runner_passes_policy_language`;
+  - mutation 8 by `test_word_present_level_uses_centre_window`.
+- Integrity:
+  - no NUL bytes or BOMs;
+  - `IMPLEMENTATION_BRIEF.md` has 10 lines added and 0 deleted;
+  - `agent/SKILL.md` and the R4 docs are untouched.
+
+### Authorisation
+The branch `r5/signal-speech-qc` at `cc3ac9b` is approved to fast-forward `claude/vibrant-brahmagupta-yr5pu4`
+(currently `a4c3843`) on the owner's PC, and to be pushed to origin.
+
+Markers:
+- **contains:** `def signal_word_presence` and `def word_present` in `magicvideo/qc/runner.py`;
+  `signal_check: true` and `asr_language: null` in `magicvideo/default_policy.yaml`.
+- **absent:** `for k in range(-L, L + 1)` in `magicvideo/qc/runner.py`.
