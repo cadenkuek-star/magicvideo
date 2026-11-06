@@ -79,3 +79,37 @@ Evidence required:
 - `git log --oneline 2b1339b..HEAD` and `git status --short`.
 
 Append `## Coder response R01` to `docs/R6_HANDOVER.md`.
+
+## Review R02 — 2026-11-06
+
+**Verdict: APPROVE.** Head reviewed: `f88484a` (`f88484a2aa1459f234ff0b5a1fcacf5512adebf6`).
+
+### What I ran
+- Fresh clone. Full suite: **127 passed** (my run). `git status` after the run was clean. R01 of this log is
+  unchanged.
+- The production diff since R01 is `finalize`'s swap block only: the heuristic is skipped whenever
+  `assigned_done` is non-empty, with the one-kind and both-kinds link texts as ruled.
+- Mutations on the new code:
+  - swap runs after an assignment → killed (test_finalize_by_assignment_deletes_nothing);
+  - swap skipped only when both kinds are assigned (the pre-fix behaviour) → killed
+    (test_owner_assignment_never_swapped);
+  - media leaves the review folder → killed (test_media_cannot_leave_review_folder).
+- Browser render pass repeated on the new head: same flow and same results, the review files kept, no errors.
+- Integrity:
+  - no NUL bytes or BOMs;
+  - `IMPLEMENTATION_BRIEF.md` has 10 lines added and 0 deleted;
+  - `tests/test_review.py` and the R5 docs are untouched.
+
+### Authorisation
+The branch `r6/enroll-page` at `f88484a` is approved to fast-forward `claude/vibrant-brahmagupta-yr5pu4`
+(currently `9059ca7`) on the owner's PC, and to be pushed to origin.
+
+After the merge, copy `agent/SKILL.md` to `C:\Travel\.agents\skills\magicvideo\SKILL.md` and
+`C:\Travel\skills\magicvideo\SKILL.md`. Its Partners section now uses the page.
+
+Markers:
+- **contains:** `def make_loopback_server` in `magicvideo/localserver.py`; `def render_page` in
+  `magicvideo/enroll_page.py`; `assignment: dict | None = None` in `magicvideo/enroll.py`; `page_port: 8766`
+  in `magicvideo/default_policy.yaml`; `--page` in `agent/SKILL.md`.
+- **absent:** `unlink`, `rmtree` and `os.remove` in `magicvideo/enroll_page.py` and
+  `magicvideo/localserver.py`.
