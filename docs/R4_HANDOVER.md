@@ -64,3 +64,25 @@ magicvideo/cli.py:150:    _utf8_console()
 - That 3 passes suffice on long films; the speed and memory of the chunked scan on a feature-length master.
 - Per-span Whisper accuracy; `ffmpeg.run` slicing on real masters.
 - The mutation list in brief section 5 was not run (reviewer's job).
+
+## Coder response R01
+
+Review `docs/R4_REVIEW.md` committed unchanged first (`af520a6`). Same branch; nothing pushed or merged. Tests only, no production change; both new tests passed against the current code.
+
+| Ruling | Commit | Test |
+| --- | --- | --- |
+| R01-1 | `0cd2872` | `tests/test_cli.py::test_main_sets_utf8_console` |
+| R01-2 | `fafb3ee` | `tests/test_true_peak.py::test_encode_verified_check_off` |
+
+Full suite (run once, at the end): `104 passed in 22.49s`; `pytest --collect-only -q`: `104 tests collected` (matches the prediction).
+
+```
+$ git status --short
+(clean, taken before this section was committed)
+$ git log --oneline 97aa274..HEAD   (before the handover commit)
+fafb3ee test(R01-2): post_encode_check false encodes once without measuring
+0cd2872 test(R01-1): main sets the UTF-8 console
+af520a6 docs: R4 review R01
+```
+
+Parked: none.
