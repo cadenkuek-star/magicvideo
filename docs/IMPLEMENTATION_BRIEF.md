@@ -386,3 +386,17 @@ Source: `docs/R2_BRIEF.md`. Where this section differs from §1–§9, this sect
 - Privacy: only these low-res grids are seen by the agent's model.
 
 **Other.** Capture times are read from file names with a prefix (`026_DJI_2026…`, `(?:^|(?<=[^A-Za-z0-9]))` instead of `^`). The end-to-end test pins QC to "no ASR".
+
+## 11. Round 3 changes
+
+Source: `docs/R3_BRIEF.md`. Where this section differs from earlier sections, this section wins.
+
+**Rendered-speech QC.** `speech.partner_words_rendered` compares tokens, not Whisper words. `qc/runner.py::speech_tokens` normalises each word, splits words containing CJK ideographs, hiragana or katakana into single characters (Latin/digit runs inside stay one token) and, when `qc.fold_chinese_script` is true and `zhconv` imports, folds Simplified/Traditional with `zhconv.convert(ch, "zh-hans")`. `rendered_speech_check` matches planned tokens (each with the master time of its word, in film order) against the heard tokens with `difflib.SequenceMatcher(autojunk=False)` and returns `ratio`, `matched`, `total`, `folded` and `missing_runs` (runs of at least `qc.speech_missing_run_min` unheard planned tokens, with master `t0`/`t1`). `magicvideo qc` writes `qc/<master stem>_speech.json` (`planned`, `heard`, `result`). Without zhconv folding is off and the check detail says so. New optional extra: `zh = ["zhconv>=1.4"]` (also in `all`).
+
+**Whisper hallucinations.** `asr_filter` policy (`enabled`, `phrases`, `no_speech_prob_min`, `avg_logprob_max`). `analysis/asr.py` now stores `no_speech_prob`, `avg_logprob` and `compression_ratio` per segment (older transcripts lack them). `plan/data.py::drop_hallucinations` removes the words of a segment whose normalised text is in the phrase list, or whose stored `no_speech_prob >= no_speech_prob_min` and `avg_logprob <= avg_logprob_max` (both must be stored and hold); it remaps voice windows and embedding rows. Word probability is never used. `load_clip` stores `ClipData.dropped_speech`; the plan warns once per dropped segment.
+
+**Edge speech.** `moments.edge_speech: {start_s, end_s}`. `plan/planner.py::edge_speech_warnings` warns when a selected conversation's last word ends within `end_s` of the clip end, or its first word starts within `start_s` of the clip start.
+
+**Insta360 from the preview.** `insta360.plan_unstitched` (default true): `plan/planner.py::filter_plannable` keeps unstitched `.insv` clips (planned from the `.lrv`) with a warning instead of skipping them. `x6_export_list(timeline, inventory, policy)` lists the unstitched clips the timeline uses, with `uses` ranges; `run_plan` writes `plan/x6_exports_<tag>.md` (only when non-empty) and adds a plan warning. `Renderer.run` raises `ProjectError` naming the files and the `.md` before creating any output. Clip ids hash the primary `.insv` path, so ids, moment ids and overrides survive when the Studio export appears.
+
+**Names.** `ingest.insta360_key` and `detect_camera` use `.search` on `_INSTA_RE` / `_DJI_RE`, so prefixed names (`026_VID_…`, `034_DJI_…`) group and detect.

@@ -73,6 +73,16 @@ magicvideo review C:\Travel\work\<Trip>
 **Re-plan now**. Wait until they say they are done, then stop the review server (Ctrl+C).
 Pass on every plan warning.
 
+### Insta360 clips
+If the plan warns that Insta360 clips need exporting, open `C:\Travel\work\<Trip>\plan\x6_exports_vNNN.md` and
+tell the owner which files to export from Insta360 Studio. After they confirm, run `magicvideo analyze` and
+`magicvideo plan` again. Don't render before that; render will refuse.
+
+### Plan warnings to pass on
+- "speech runs to the end/start of the file": the source clip was trimmed too tight; ask the owner to export it
+  longer.
+- "ignored likely Whisper hallucination": nothing to do; mention it.
+
 ### Render and check
 ```
 magicvideo render C:\Travel\work\<Trip>
