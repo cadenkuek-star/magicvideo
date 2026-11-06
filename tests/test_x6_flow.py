@@ -63,14 +63,14 @@ def test_clip_id_stable_when_export_added():
                 "projection": proj, "render_path": f"/x/{rel}"}
 
     def build(with_export):
-        ms = [member("026_VID_20260919_110940_00_004.insv", "dual_fisheye"),
-              member("026_LRV_20260919_110940_11_004.lrv", "flat")]
+        ms = [member("VID_20260919_110940_00_004.insv", "dual_fisheye"),
+              member("LRV_20260919_110940_11_004.lrv", "flat")]
         if with_export:
-            ms.append(member("026_VID_20260919_110940_00_004.mp4", "equirect"))
+            ms.append(member("VID_20260919_110940_00_004.mp4", "equirect"))
         ingest.group_insta360(ms)
         return ms
 
     before, after = build(False), build(True)
     prim = lambda ms: next(c for c in ms if "role" not in c)  # noqa: E731
-    assert prim(before)["clip_id"] == prim(after)["clip_id"] == "c_026_VID_20260919_110940_00_004.insv"
+    assert prim(before)["clip_id"] == prim(after)["clip_id"] == "c_VID_20260919_110940_00_004.insv"
     assert prim(before)["render_projection"] == "dual_fisheye" and prim(after)["render_projection"] == "equirect"

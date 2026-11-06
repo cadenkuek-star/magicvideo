@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from fractions import Fraction
 from pathlib import Path
 
 from .. import ingest
@@ -16,19 +17,55 @@ from .moments import build_clip_moments
 from .storyboard import STALE_REFS_TEXT, write_storyboard
 
 
-def plannable_clips(project: Project, warnings: list[str]) -> list[dict]:
-    pol = project.policy
-    excluded = {cid for cid, rule in (project.overrides().get("clips") or {}).items() if (rule or {}).get("exclude")}
+def filter_plannable(clips: list[dict], excluded: set[str], pol, warnings: list[str]) -> list[dict]:
     out = []
-    for c in ingest.plannable(project.inventory()):
+    for c in clips:
         if c["clip_id"] in excluded:
             continue
         if c.get("render_projection", c.get("projection")) == "dual_fisheye" and not pol("insta360.allow_unstitched_render"):
-            warnings.append(f"{c['rel_path']}: unstitched 360 recording skipped (export it from Insta360 Studio, "
-                            "or set insta360.allow_unstitched_render)")
-            continue
+            if pol("insta360.plan_unstitched"):
+                warnings.append(f"{c['rel_path']}: planned from its preview; if the film uses it you will be asked "
+                                "to export it from Insta360 Studio before render")
+            else:
+                warnings.append(f"{c['rel_path']}: unstitched 360 recording skipped (export it from Insta360 "
+                                "Studio, or set insta360.allow_unstitched_render)")
+                continue
         out.append(c)
     return out
+
+
+def plannable_clips(project: Project, warnings: list[str]) -> list[dict]:
+    excluded = {cid for cid, rule in (project.overrides().get("clips") or {}).items() if (rule or {}).get("exclude")}
+    return filter_plannable(ingest.plannable(project.inventory()), excluded, project.policy, warnings)
+
+
+def x6_export_list(timeline: dict, inventory: list[dict], pol) -> list[dict]:
+    """Unstitched Insta360 clips the timeline uses (they must be exported from Studio before render)."""
+    if pol("insta360.allow_unstitched_render"):
+        return []
+    fps = float(Fraction(*timeline["fps"]))
+    inv = {c["clip_id"]: c for c in inventory}
+    uses: dict[str, list[list[float]]] = {}
+    for it in list(timeline.get("segments", [])) + list(timeline.get("overlays", [])):
+        c = inv.get(it["clip_id"])
+        if c and c.get("render_projection", c.get("projection")) == "dual_fisheye":
+            t0 = float(it["src_in"])
+            uses.setdefault(c["clip_id"], []).append([round(t0, 1), round(t0 + it["frames"] / fps, 1)])
+    return sorted(({"rel_path": inv[cid]["rel_path"], "uses": sorted(u)} for cid, u in uses.items()),
+                  key=lambda e: e["rel_path"])
+
+
+def x6_exports_text(exports: list[dict], tag: str) -> str:
+    lines = [f"# Insta360 clips to export before render ({tag})", "",
+             "The film uses these Insta360 recordings. Export each one from Insta360 Studio (whole clip):", ""]
+    for e in exports:
+        ranges = ", ".join(f"{a:.1f}-{b:.1f}s" for a, b in e["uses"])
+        lines.append(f"- {e['rel_path']} (the film uses: {ranges}; for reference, export the whole clip)")
+    lines += ["", "Steps in Insta360 Studio:", "1. Open the file.",
+              "2. Export -> 360\u00b0 -> Equirectangular, with FlowState stabilization and horizon lock on.",
+              "3. Save the export next to the .insv file, with Studio's default name.", "",
+              "Then run `magicvideo analyze` and `magicvideo plan` again, and render.", ""]
+    return "\n".join(lines)
 
 
 def edge_speech_warnings(selected: list, cds: dict, policy) -> list[str]:
@@ -130,8 +167,14 @@ def run_plan(project: Project, thumbs: bool = False) -> dict[str, Path]:
     result = make_plan(project)
     v = next_version(project.plan_dir, "plan_v*.json")
     tag = vtag(v)
+    exports = x6_export_list(result["timeline"], project.inventory(), project.policy)
+    if exports:
+        result["plan"]["warnings"].append(f"{len(exports)} Insta360 clip(s) need exporting before render: "
+                                          f"see plan/x6_exports_{tag}.md")
     plan_path = write_json(project.plan_dir / f"plan_{tag}.json", result["plan"])
     tl_path = write_json(project.plan_dir / f"timeline_{tag}.json", result["timeline"])
+    if exports:
+        (project.plan_dir / f"x6_exports_{tag}.md").write_text(x6_exports_text(exports, tag), encoding="utf-8")
     sb_path = write_storyboard(project, result["plan"], result["timeline"], project.plan_dir / f"storyboard_{tag}.html",
                                thumbs=thumbs)
     st = result["plan"]["stats"]

@@ -164,6 +164,7 @@ color:
 
 insta360:
   stitcher: auto                 # auto | studio_export | media_sdk
+  plan_unstitched: true          # plan unstitched .insv from its .lrv preview; export only the selected clips before render
   allow_unstitched_render: false # render .insv dual fisheye directly (visible seams)
   fisheye_fov_deg: 200           # per-lens FOV for dual-fisheye conversion; verify on an X6 sample
   analysis_views: 6

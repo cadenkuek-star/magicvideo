@@ -13,6 +13,7 @@ from .. import ffmpeg
 from ..project import Project, ProjectError
 from ..util import log, read_json, safe_name, version_of, vtag, write_json
 from . import audio as A
+from ..plan.planner import x6_export_list
 from .export import write_edl_csv, write_otio
 from .filters import (path_for_piece, per_frame_commands, reframe_filters, rotate_filters, stabilize_backend,
                       stabilize_filters, v360_filter)
@@ -195,6 +196,11 @@ class Renderer:
         if master_path.exists():
             raise ProjectError(f"{master_path.name} already exists; outputs are never overwritten "
                                "(run `magicvideo plan` to create a new version)")
+        exports = x6_export_list(self.timeline, list(self.clips.values()), self.policy)
+        if exports:
+            names = ", ".join(e["rel_path"] for e in exports)
+            raise ProjectError(f"{len(exports)} Insta360 clip(s) must be exported from Insta360 Studio before "
+                               f"render: {names}. See {self.p.plan_dir / f'x6_exports_{self.tag}.md'}")
         self.pdir.mkdir(parents=True, exist_ok=True)
         pieces = pieces_of(self.timeline)
         workers = int(self.policy("render.workers")) if str(self.policy("render.workers")) != "auto" \
