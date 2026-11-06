@@ -54,15 +54,13 @@ magicvideo tags import C:\Travel\work\<Trip>
 If `C:\Travel\people\refs.npz` is missing, or the owner says recognition is wrong:
 ```
 magicvideo enroll C:\Travel\work\<Trip>
+magicvideo enroll C:\Travel\work\<Trip> --page
 ```
-Tell the owner to open `C:\Travel\people\REVIEW_<Trip>.md` and keep only the folders that are the two of them. You
-may compare `person_NNN` images with `C:\Travel\Couple_References` and suggest which folders are the couple, but the
-owner deletes. Then:
-```
-magicvideo enroll C:\Travel\work\<Trip> --finalize
-```
-If one partner is in two voice folders (e.g. quieter behind the camera), add `--merge voice_003:voice_001`. If a
-partner has only a couple of clips, add `--allow-sparse`. Read the report and pass on any warning.
+The page opens in the browser. Tell the owner: tap A or B on each face group and voice group that is one of them,
+Not us on the rest, tap any photo or clip that is someone else to leave it out, then press Finish. Nothing is
+deleted. You may compare `person_NNN` photos with `C:\Travel\Couple_References` and suggest which groups are the
+couple, but the owner decides. When they say they are done, stop the page (Ctrl+C), pass on the report and any
+warning, then run `magicvideo plan` again.
 
 ### Plan and review
 ```
