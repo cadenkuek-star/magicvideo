@@ -133,6 +133,8 @@ def test_plan_render_qc(trip, monkeypatch):
     failed = [c for c in checks if c["status"] == "FAIL"]
     assert not failed, failed
     skipped = {c["id"] for c in checks if c["status"] == "SKIPPED"}
-    assert verdict == "INCOMPLETE" and "speech.partner_words_rendered" in skipped  # no ASR backend here
+    status = {c["id"]: c["status"] for c in checks}
+    assert status["speech.partner_words_rendered"] == "PASS"   # decided by the audio signal, no ASR needed
+    assert verdict == ("INCOMPLETE" if skipped else "PASS")
     with pytest.raises(Exception):
         Renderer(trip, "v001").run()  # never overwrite an existing output
