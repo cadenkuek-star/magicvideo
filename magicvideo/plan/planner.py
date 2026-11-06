@@ -31,6 +31,31 @@ def plannable_clips(project: Project, warnings: list[str]) -> list[dict]:
     return out
 
 
+def edge_speech_warnings(selected: list, cds: dict, policy) -> list[str]:
+    """Warn when selected conversations start/end right at the edge of their source file (sentence may be cut)."""
+    start_s = float(policy("moments.edge_speech.start_s"))
+    end_s = float(policy("moments.edge_speech.end_s"))
+    found: list[tuple[str, float, str]] = []
+    for m in selected:
+        if m.kind != "conversation":
+            continue
+        cd = cds[m.clip_id]
+        idx = cd.words_in(m.t0, m.t1)
+        if not idx:
+            continue
+        first, last = cd.words[idx[0]], cd.words[idx[-1]]
+        rel = cd.clip["rel_path"]
+        if last["t1"] >= cd.duration - end_s:
+            found.append((rel, last["t1"], f"{rel}: speech runs to the end of the file (last word ends at "
+                          f"{last['t1']:.1f}s of {cd.duration:.1f}s); the sentence may be cut. If you trimmed "
+                          f"this clip, export it a few seconds longer."))
+        if first["t0"] <= start_s:
+            found.append((rel, first["t0"], f"{rel}: speech starts at the very beginning of the file (first word "
+                          f"starts at {first['t0']:.1f}s); the sentence may be cut. If you trimmed this clip, "
+                          f"export it a few seconds earlier."))
+    return [text for _, _, text in sorted(found, key=lambda x: (x[0], x[1], x[2]))]
+
+
 def make_plan(project: Project) -> dict:
     policy = project.policy
     overrides = project.overrides()
@@ -64,6 +89,7 @@ def make_plan(project: Project) -> dict:
     apply_overrides(moments, cds, overrides)
     warnings += select_all(events, moments, cds, policy, overrides)
     selected = [m for m in moments if m.selected]
+    warnings += edge_speech_warnings(selected, cds, policy)
     timeline = build_timeline(project.name, selected, moments, cds, chapters, {e.id: e.chapter for e in events},
                               policy, overrides)
     total = sum(eff_len(m) for m in selected)

@@ -79,6 +79,7 @@ enrollment:
   min_kept_per_partner: {face: 4, voice: 3}
 
 moments:
+  edge_speech: {start_s: 0.3, end_s: 1.5}   # warn if couple speech starts/ends this close to a clip edge
   conversation:
     join_gap_s: 6.0
     pre_roll_s: 0.7
