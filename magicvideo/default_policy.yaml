@@ -20,6 +20,15 @@ cloud:                           # scene tagging only; nothing else ever leaves 
   frames_per_request: 9          # sent as one labelled 3x3 grid
   frame_interval_s: 3.0
 
+asr_filter:
+  enabled: true
+  # whole-segment texts Whisper invents on silence/music; compared after removing spaces and punctuation, lowercase
+  phrases: ["ご視聴ありがとうございました", "ご視聴ありがとうございます", "thankyouforwatching",
+            "thanksforwatching", "pleasesubscribe", "subtitlesbytheamaraorgcommunity", "字幕由amaraorg社区提供",
+            "请不吝点赞订阅转发打赏支持明镜与点点栏目", "謝謝觀看", "谢谢观看", "感謝收看", "感谢收看"]
+  no_speech_prob_min: 0.6      # with avg_logprob_max: both must hold (only when the segment stores them)
+  avg_logprob_max: -1.0
+
 review:
   port: 8765                      # `magicvideo review` listens on 127.0.0.1 only
 

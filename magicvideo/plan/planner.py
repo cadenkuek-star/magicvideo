@@ -44,6 +44,10 @@ def make_plan(project: Project) -> dict:
         warnings.append("no face enrollment: partner visibility unknown (solo-shot rule and partner-gap check off)")
     clips = plannable_clips(project, warnings)
     cds: dict[str, ClipData] = {c["clip_id"]: load_clip(project, c, refs, policy) for c in clips}
+    for cd in sorted(cds.values(), key=lambda c: c.clip["rel_path"]):
+        for d in cd.dropped_speech:
+            warnings.append(f"{cd.clip['rel_path']} {d['t0']:.1f}\u2013{d['t1']:.1f}s: ignored likely Whisper "
+                            f"hallucination \u201c{d['text']}\u201d")
     missing_asr = [cd.clip["rel_path"] for cd in cds.values() if cd.clip.get("has_audio") and not cd.asr_done]
     if missing_asr:
         warnings.append(f"{len(missing_asr)} clip(s) without transcripts: their speech is not protected")

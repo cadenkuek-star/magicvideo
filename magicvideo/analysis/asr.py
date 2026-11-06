@@ -47,7 +47,12 @@ def transcribe(audio_path: Path, policy: Policy) -> dict:
                                       beam_size=5, condition_on_previous_text=False)
     words, segs = [], []
     for seg in segments:
-        segs.append({"t0": seg.start, "t1": seg.end, "text": seg.text.strip()})
+        entry = {"t0": seg.start, "t1": seg.end, "text": seg.text.strip()}
+        for key in ("no_speech_prob", "avg_logprob", "compression_ratio"):
+            val = getattr(seg, key, None)
+            if val is not None:
+                entry[key] = round(float(val), 4)
+        segs.append(entry)
         for w in seg.words or []:
             text = w.word.strip()
             if text:

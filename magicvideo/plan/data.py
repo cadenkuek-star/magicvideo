@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import bisect
+import unicodedata
 
 import numpy as np
 
@@ -31,6 +32,7 @@ class ClipData:
     tags: list[dict] = field(default_factory=list)
     asr_done: bool = False
     window_evidence: list[dict] = field(default_factory=list)
+    dropped_speech: list[dict] = field(default_factory=list)
 
     @property
     def id(self) -> str:
@@ -111,6 +113,52 @@ def build_turns(words: list[dict], windows: list[dict], labels: list[str], max_g
     return turns
 
 
+def _norm_phrase(text: str) -> str:
+    return "".join(c for c in text.lower() if not c.isspace() and unicodedata.category(c)[0] not in "PS")
+
+
+def drop_hallucinations(words: list[dict], segments: list[dict], windows: list[dict], emb: np.ndarray,
+                        policy: Policy) -> tuple[list[dict], list[dict], np.ndarray, list[dict]]:
+    """Remove words of segments Whisper most likely invented (known phrases, or both scores bad)."""
+    if not policy("asr_filter.enabled") or not segments or not words:
+        return words, windows, emb, []
+    phrases = {_norm_phrase(p) for p in policy("asr_filter.phrases")}
+    ns_min = float(policy("asr_filter.no_speech_prob_min"))
+    lp_max = float(policy("asr_filter.avg_logprob_max"))
+    bad: list[int] = []
+    for k, seg in enumerate(segments):
+        hall = _norm_phrase(seg.get("text", "")) in phrases
+        if not hall and "no_speech_prob" in seg and "avg_logprob" in seg:
+            hall = float(seg["no_speech_prob"]) >= ns_min and float(seg["avg_logprob"]) <= lp_max
+        if hall:
+            bad.append(k)
+    if not bad:
+        return words, windows, emb, []
+    owner: list[int | None] = []
+    for w in words:
+        owner.append(next((k for k, s in enumerate(segments) if s["t0"] - 0.01 <= w["t0"] < s["t1"] + 0.01), None))
+    drop = [o is not None and o in bad for o in owner]
+    new_index: list[int] = []
+    n = 0
+    for d in drop:
+        new_index.append(n)
+        if not d:
+            n += 1
+    new_index.append(n)
+    kept_words = [w for w, d in zip(words, drop) if not d]
+    new_windows, rows = [], []
+    for i, win in enumerate(windows):
+        a, b = win["w0"], min(win["w1"], len(words))
+        if not any(not drop[j] for j in range(a, b)):
+            continue
+        new_windows.append({**win, "w0": new_index[a], "w1": new_index[a] + sum(1 for j in range(a, b) if not drop[j])})
+        rows.append(i)
+    new_emb = emb[rows] if len(emb) == len(windows) else emb
+    dropped = [{"t0": segments[k]["t0"], "t1": segments[k]["t1"], "text": segments[k].get("text", "").strip()}
+               for k in bad]
+    return kept_words, new_windows, new_emb, dropped
+
+
 def load_clip(project, clip: dict, refs: dict | None, policy: Policy) -> ClipData:
     adir: Path = project.analysis_dir(clip["clip_id"])
     status = project.step_status(clip["clip_id"])
@@ -126,6 +174,8 @@ def load_clip(project, clip: dict, refs: dict | None, policy: Policy) -> ClipDat
     else:
         windows = build_windows(cd.words, float(policy("voice.window_gap_s")), float(policy("voice.window_max_s")))
         emb = np.zeros((0, 192), np.float32)
+    cd.words, windows, emb, cd.dropped_speech = drop_hallucinations(
+        cd.words, (tr or {}).get("segments", []), windows, emb, policy)
     fj = read_json(adir / "faces.json")
     face_emb = None
     if fj is not None and (adir / "face_emb.npy").exists():
