@@ -63,3 +63,31 @@ Evidence required:
 - `git log --oneline 97aa274..HEAD` and `git status --short`.
 
 Append `## Coder response R01` to `docs/R4_HANDOVER.md`.
+
+## Review R02 — 2026-11-06
+
+**Verdict: APPROVE.** Head reviewed: `d3ecf8f` (`d3ecf8f94bf1463e44d139d618c505eb091820ea`).
+
+### What I ran
+- Fresh clone. Full suite: **104 passed** (my run). `git status` after the run was clean. R01 of this log is
+  unchanged.
+- No production change since R01: `git diff 97aa274..HEAD -- magicvideo` is empty.
+- The two R01 survivors were re-run and are now killed:
+  - mutation 10 by `test_main_sets_utf8_console`;
+  - mutation 12 by `test_encode_verified_check_off`.
+- Integrity:
+  - no NUL bytes or BOMs;
+  - `IMPLEMENTATION_BRIEF.md` has 12 lines added and 0 deleted;
+  - `agent/SKILL.md` and the R3 docs are untouched.
+- The real-audio W1 result from R01 stands: TP +2.91 → −1.54 dBTP, I −16.01 LUFS.
+
+### Authorisation
+The branch `r4/peaks-language` at `d3ecf8f` is approved to fast-forward `claude/vibrant-brahmagupta-yr5pu4`
+(currently `486c485`) on the owner's PC, and to be pushed to origin.
+
+Markers:
+- **contains:** `def _encode_verified` in `magicvideo/render/renderer.py`; `def scan_true_peaks` in
+  `magicvideo/render/audio.py`; `def language_spans` in `magicvideo/qc/runner.py`; `_utf8_console()` in
+  `magicvideo/cli.py`; `post_encode_check: true` in `magicvideo/default_policy.yaml`.
+- **absent:** a direct `"-c:a", "aac"` master mux inside `Renderer.run` (the master is encoded only through
+  `_encode_master`).
