@@ -102,3 +102,25 @@ def test_select_all_is_deterministic():
         select_all([_ev(typ="general")], ms, {cd.id: cd}, p, {"moments": {}, "events": {}})
         out.append([(m.id, m.selected, m.reason) for m in ms])
     assert out[0] == out[1]
+
+
+def test_couple_override_counts_as_couple():
+    from magicvideo.plan.budget import apply_overrides
+
+    p = policy()
+    cd = clipdata(clip(duration=600))
+    tp = Moment(id="t1", clip_id=cd.id, kind="third_party", t0=100, t1=105, abs_t0=100, cls="third_party",
+                event_id="e1")
+    other = Moment(id="t2", clip_id=cd.id, kind="third_party", t0=200, t1=205, abs_t0=200, cls="third_party",
+                   event_id="e1")
+    over = {"moments": {"t1": "couple"}, "events": {}}
+    ms = [tp, other]
+    apply_overrides(ms, {cd.id: cd}, over)
+    assert tp.cls == "couple" and other.cls == "third_party"
+    select_event(_ev(typ="performance"), ms, {cd.id: cd}, p, over)
+    assert tp.selected and "kept in review" in tp.reason
+    selected = [m for m in ms if m.selected]
+    couple = sum(eff_len(m) for m in selected if m.cls == "couple")
+    third = sum(eff_len(m) for m in selected if m.cls == "third_party")
+    assert couple == 5.0 and third == (5.0 if other.selected else 0.0)
+    assert tp not in [m for m in selected if m.cls == "third_party"]
