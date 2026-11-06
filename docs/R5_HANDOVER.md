@@ -78,3 +78,27 @@ ca46f28 test(R01-1): word_present on the padded-master contract; late/early word
 ```
 
 Parked: none. Not verified: the real-footage run (the reviewer re-runs the harness); the lag loop is not vectorised (optional per the ruling).
+
+## Coder response R02
+
+Review R02 (appended to `docs/R5_REVIEW.md`) committed as it was first (`bc33c7a`). Same branch; nothing pushed or merged. Tests only, no production change; all three passed against the current code.
+
+| Ruling | Commit | Test |
+| --- | --- | --- |
+| R02-1 | `3c5e903` | `tests/test_signal_speech.py::test_signal_presence_uses_dialogue_gain` (the `_files` helper gained a `master_db` argument) |
+| R02-2 | `155a7eb` | `tests/test_qc_speech.py::test_analysis_runner_passes_policy_language` (`run_analysis(project, ["asr"])` alone was enough; no other steps needed) |
+| R02-3 | `f807342` | `tests/test_signal_speech.py::test_word_present_level_uses_centre_window` |
+
+Full suite (run once, at the end): `116 passed in 28.58s`; `pytest --collect-only -q`: `116 tests collected` (matches the prediction).
+
+```
+$ git status --short
+(clean, taken before this section was committed)
+$ git log --oneline b109fc0..HEAD   (before the handover commit)
+f807342 test(R02-3): word_present level uses the centre window
+155a7eb test(R02-2): analysis runner passes the policy ASR language
+3c5e903 test(R02-1): signal presence uses the dialogue gain
+bc33c7a docs: R5 review R02
+```
+
+Parked: none.
