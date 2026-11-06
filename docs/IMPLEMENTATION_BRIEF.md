@@ -357,3 +357,32 @@ Each check is `{id, status: PASS|FAIL|SKIPPED, value, limit, detail}`. The verdi
 ## 9. Agent rules (for Antigravity / Claude runbooks)
 
 Run `magicvideo` commands and report the QC verdict and its failing checks word for word. Propose `policy.yaml` changes with a reason. Never write or edit `timeline*.json`, `plan*.json`, `qc*.json` or anything under `output/` by hand.
+
+## 10. Round 2 changes
+
+Source: `docs/R2_BRIEF.md`. Where this section differs from §1–§9, this section wins.
+
+**Couple prior.** Speech the voice references do not match is the couple's, unless a stranger's face is on screen.
+- Policy keys: `identity.couple_prior` (default `true`; `false` restores the old labels exactly), `identity.stranger_face.max_similarity` (0.20), `identity.stranger_face.min_q` (0.5), `identity.stranger_face.pad_s` (1.0).
+- Label `COUPLE` (`analysis/voices.py`) is a speaker label next to `PARTNER_A`, `PARTNER_B`, `OTHER` and `UNKNOWN`; `is_couple_speaker` is true for it.
+- `analysis/voices.py::window_best_scores`, `analysis/faces.py::stranger_times` and `plan/data.py::apply_couple_prior` implement it. An `OTHER` window becomes `COUPLE` unless a stranger time `t` satisfies `w.t0 - pad_s <= t <= w.t1 + pad_s`. `load_clip` loads faces before building turns.
+- `Moment.identity` (dict, serialised in the plan) holds `voice_best`, `stranger_on_screen` and `assumed_couple` for conversation and third-party moments; the storyboard card shows it as one line.
+
+**Enrollment.** `magicvideo enroll <work> --finalize [--merge SRC:DST]... [--allow-sparse]`.
+- `--merge` counts the files of folder SRC under partner folder DST. Errors (exit 1, nothing written): a folder is missing, the kinds differ (`person_` vs `voice_`), SRC is also a DST, the same SRC twice.
+- Every non-empty folder is counted after merges; if the count is not 2 the report lists the folders with their counts. A partner below `enrollment.min_kept_per_partner.<kind>` is refused unless `--allow-sparse` (minimum 1), which adds a `sparse:` line. A reference built from a single clip adds a `warning:` line.
+- `refs.npz` additionally stores `<kind>_<slot>_all` (stacked, L2-normalised embeddings). Voice scoring uses `max(centroid score, best single-row score)`; faces keep centroid scoring. Voice swapping swaps the centroid, the count and the `_all` rows together.
+
+**Stale references.** `plan_vNNN.json` carries `refs_sha256` (sha256 of `refs.npz`, or null). `plan/planner.py::stale_refs` compares it with the current file; `magicvideo render`, `magicvideo review` and the storyboard banner report a mismatch.
+
+**Review server.** `magicvideo review <work> [--plan vNNN] [--port N] [--no-open]` (`magicvideo/review.py`, standard library only; policy `review.port`, default 8765). It binds 127.0.0.1 only and answers 403 to any request whose `Host` is not `127.0.0.1:<port>` or `localhost:<port>`; every POST needs `Content-Type: application/json` (else 415).
+- `GET /` storyboard · `GET /thumbs/<name>` (only inside `plan/thumbs/`) · `GET /api/overrides` → `{"overrides", "version", "stale_refs"}` · `POST /api/moment` `{"id", "value": keep|drop|couple|clear}` (unknown id or value → 400) · `POST /api/replan` → `{"version"}`.
+- `overrides.yaml` is read as `utf-8-sig`, rewritten with `yaml.safe_dump(sort_keys=True)` via a temp file and `os.replace`, comments are lost, the old file is copied to `overrides.yaml.bak` once per server session, `clear` deletes the key.
+- New override value `couple` ("this is us"): `plan/budget.py::apply_overrides` sets `cls = "couple"`; the moment is then treated like `keep` and counts in the couple share.
+
+**Scene tags by the agent (no API key).** `cloud.provider` defaults to `agent`; `anthropic` stays supported (and raises `BackendMissing` when no key is available).
+- `analyze` (tags step) calls `analysis/tags.py::export_for_agent`, which writes `<work>/tagging/<clip_id>/grid_NNN.jpg` and `grid_NNN.cells.json`, and records the step status `skipped: awaiting agent tags`. `<work>/tagging/TASKS.md` holds the prompt, the allowed lists, the response schema, the answer-file rule and a checklist.
+- The agent writes `grid_NNN.answer.json` (`{"cells": [...]}`) next to each grid. `magicvideo tags export <work>` and `magicvideo tags import <work>` run the two halves; import validates cells 1..n, merges into `analysis/<clip>/tags.json` (backend `agent`, idempotent on `(t, view)`), and sets `tags: done` for a clip whose grids are all imported.
+- Privacy: only these low-res grids are seen by the agent's model.
+
+**Other.** Capture times are read from file names with a prefix (`026_DJI_2026…`, `(?:^|(?<=[^A-Za-z0-9]))` instead of `^`). The end-to-end test pins QC to "no ASR".
