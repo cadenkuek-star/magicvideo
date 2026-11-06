@@ -63,7 +63,7 @@ def filename_time(name: str) -> dt.datetime | None:
 
 def insta360_key(name: str) -> tuple[str, str] | None:
     """(group key, kind) for Insta360 names; kind in {'vid','lrv'}; lens index in key suffix."""
-    m = _INSTA_RE.match(name)
+    m = _INSTA_RE.search(name)
     if not m:
         return None
     prefix = m.group(1).upper()
@@ -116,9 +116,9 @@ def detect_camera(name: str, ext: str, tags: dict[str, str]) -> dict:
     blob = " ".join(f"{k}={v}" for k, v in tags.items()).lower()
     make = None
     model = tags.get("com.apple.quicktime.model") or tags.get("model") or tags.get("com.android.model")
-    if _DJI_RE.match(name) or "dji" in blob:
+    if _DJI_RE.search(name) or "dji" in blob:
         make = "DJI"
-    elif ext in (".insv", ".lrv") or _INSTA_RE.match(name) or "insta360" in blob:
+    elif ext in (".insv", ".lrv") or _INSTA_RE.search(name) or "insta360" in blob:
         make = "Insta360"
     elif tags.get("com.apple.quicktime.make", "").lower() == "apple" or "iphone" in blob:
         make = "Apple"
