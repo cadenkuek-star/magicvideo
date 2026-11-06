@@ -107,3 +107,10 @@ def test_signal_presence_uses_dialogue_gain(tmp_path):
     assert signal_word_presence(master, words, inv, log, policy())["ratio"] == 1.0
     assert signal_word_presence(master, words, inv, {}, policy())["ratio"] == 0.0
 
+
+def test_word_present_level_uses_centre_window():
+    s = _noise()
+    pad = _noise(L, seed=7)
+    m = np.concatenate([pad, s * 0.05, pad]).astype(np.float32)
+    ok, corr, lvl = word_present(m, s, SR, 0.05, 0.6, -12.0, 0.0)
+    assert not ok and lvl < -20
