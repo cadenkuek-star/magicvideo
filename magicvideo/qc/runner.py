@@ -185,6 +185,19 @@ def _master_time(timeline: dict, fps: float, clip_id: str, t: float) -> float | 
     return None
 
 
+def language_spans(segments: list[dict], clip_lang: dict, fps: float, merge_gap_s: float) -> list[dict]:
+    """[{t0, t1, lang}] in master seconds, film order; neighbours of one language closer than merge_gap_s merge."""
+    spans: list[dict] = []
+    for s in sorted(segments, key=lambda s: s["start_frame"]):
+        t0, t1 = s["start_frame"] / fps, (s["start_frame"] + s["frames"]) / fps
+        lang = clip_lang.get(s["clip_id"])
+        if spans and spans[-1]["lang"] == lang and t0 - spans[-1]["t1"] <= merge_gap_s:
+            spans[-1]["t1"] = max(spans[-1]["t1"], t1)
+        else:
+            spans.append({"t0": t0, "t1": t1, "lang": lang})
+    return spans
+
+
 def _covered(seg_spans: dict[str, list[tuple[float, float]]], clip_id: str, t: float) -> bool:
     return any(a <= t < b for a, b in seg_spans.get(clip_id, []))
 
@@ -240,15 +253,27 @@ def editorial(project: Project, plan: dict, timeline: dict, policy: Policy, mast
         if master is None or not planned_words:
             raise RuntimeError("nothing to compare")
         from ..analysis import asr
-        wav = project.qc_dir / f"{master.stem}_16k.wav"
-        ffmpeg.extract_audio(master, wav)
-        heard = [w["w"] for w in asr.transcribe(wav, policy)["words"]]
-        wav.unlink(missing_ok=True)
+        times = [t for _, t in planned_words]
+        used = [sg for sg in timeline["segments"]
+                if any(sg["start_frame"] / fps <= t < (sg["start_frame"] + sg["frames"]) / fps for t in times)]
+        clip_lang = {cid: (read_json(project.analysis_dir(cid) / "transcript.json") or {}).get("language")
+                     for cid in sorted({sg["clip_id"] for sg in used})}
+        spans = language_spans(used, clip_lang, fps, float(policy("qc.speech_span_merge_gap_s")))
+        heard: list[str] = []
+        for k, sp in enumerate(spans):
+            wav = project.qc_dir / f"{master.stem}_span{k:03d}_16k.wav"
+            a = max(0.0, sp["t0"] - 0.3)
+            ffmpeg.run(["-y", "-v", "error", "-ss", f"{a:.3f}", "-t", f"{sp['t1'] + 0.3 - a:.3f}", "-i", str(master),
+                        "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav)])
+            try:
+                heard += [w["w"] for w in asr.transcribe(wav, policy, language=sp["lang"])["words"]]
+            finally:
+                wav.unlink(missing_ok=True)
         fold = bool(policy("qc.fold_chinese_script"))
         res = rendered_speech_check(planned_words, heard, fold, int(policy("qc.speech_missing_run_min")))
         report = project.qc_dir / f"{master.stem}_speech.json"
         write_json(report, {"planned": speech_tokens([w for w, _ in planned_words], fold),
-                            "heard": speech_tokens(heard, fold), "result": res})
+                            "heard": speech_tokens(heard, fold), "spans": spans, "result": res})
         detail = (f"{res['matched']}/{res['total']} planned partner characters/words heard; "
                   f"{len(res['missing_runs'])} unheard runs (see {report.name})")
         if fold and not res["folded"]:

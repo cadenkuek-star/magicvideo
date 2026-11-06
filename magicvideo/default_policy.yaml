@@ -182,6 +182,7 @@ insta360:
 
 qc:
   fold_chinese_script: true       # compare Simplified and Traditional as the same (needs zhconv)
+  speech_span_merge_gap_s: 2.0     # QC transcribes the master in spans of one language; merge spans closer than this
   speech_missing_run_min: 3        # report runs of at least this many unheard planned tokens
   couple_word_retention_min: 0.98   # planned: partner words kept in the timeline
   rendered_word_match_min: 0.90     # independent re-transcription of the master (ASR noise allowed)

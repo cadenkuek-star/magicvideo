@@ -41,10 +41,10 @@ def load_model(policy: Policy):
     return _MODEL
 
 
-def transcribe(audio_path: Path, policy: Policy) -> dict:
+def transcribe(audio_path: Path, policy: Policy, language: str | None = None) -> dict:
     model = load_model(policy)
     segments, info = model.transcribe(str(audio_path), word_timestamps=True, vad_filter=True,
-                                      beam_size=5, condition_on_previous_text=False)
+                                      beam_size=5, condition_on_previous_text=False, language=language)
     words, segs = [], []
     for seg in segments:
         entry = {"t0": seg.start, "t1": seg.end, "text": seg.text.strip()}
