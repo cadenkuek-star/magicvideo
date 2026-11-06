@@ -18,9 +18,9 @@ VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".mkv", ".avi", ".mts", ".m2ts", ".3gp", "
 SKIP_DIR_NAMES = {"$recycle.bin", "system volume information", "output", "work", "people", "proxies",
                   "analysis", "render", "__pycache__", ".thumbnails", "misc"}
 
-_DJI_RE = re.compile(r"^DJI_(\d{14})_(\d{4})", re.I)
-_INSTA_RE = re.compile(r"^(VID|LRV|PRO_VID|PRO_LRV|IMG)_(\d{8})_(\d{6})_(\d{2})_(\d{3})", re.I)
-_PIXEL_RE = re.compile(r"^(?:PXL|VID|IMG)_(\d{8})_(\d{6})", re.I)
+_DJI_RE = re.compile(r"(?:^|(?<=[^A-Za-z0-9]))DJI_(\d{14})_(\d{4})", re.I)
+_INSTA_RE = re.compile(r"(?:^|(?<=[^A-Za-z0-9]))(VID|LRV|PRO_VID|PRO_LRV|IMG)_(\d{8})_(\d{6})_(\d{2})_(\d{3})", re.I)
+_PIXEL_RE = re.compile(r"(?:^|(?<=[^A-Za-z0-9]))(?:PXL|VID|IMG)_(\d{8})_(\d{6})", re.I)
 
 
 # --------------------------------------------------------------------------- discovery
@@ -40,19 +40,19 @@ def discover(source_dirs: list[Path]) -> list[tuple[Path, Path]]:
 # --------------------------------------------------------------------------- parsing helpers
 def filename_time(name: str) -> dt.datetime | None:
     """Camera-local capture time from DJI / Insta360 / Pixel style file names."""
-    m = _DJI_RE.match(name)
+    m = _DJI_RE.search(name)
     if m:
         try:
             return dt.datetime.strptime(m.group(1), "%Y%m%d%H%M%S")
         except ValueError:
             return None
-    m = _INSTA_RE.match(name)
+    m = _INSTA_RE.search(name)
     if m:
         try:
             return dt.datetime.strptime(m.group(2) + m.group(3), "%Y%m%d%H%M%S")
         except ValueError:
             return None
-    m = _PIXEL_RE.match(name)
+    m = _PIXEL_RE.search(name)
     if m:
         try:
             return dt.datetime.strptime(m.group(1) + m.group(2)[:6], "%Y%m%d%H%M%S")
