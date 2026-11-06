@@ -1,5 +1,7 @@
 import pytest
 
+from helpers import policy
+
 from magicvideo.qc.runner import rendered_speech_check, speech_tokens
 
 
@@ -29,3 +31,23 @@ def test_missing_runs_reported_with_master_times():
     assert res["missing_runs"] == [{"t0": 11.0, "t1": 13.0, "text": "bravo charlie delta"}]
     assert res["matched"] == 3 and res["total"] == 6
     assert rendered_speech_check(planned, heard, False, 4)["missing_runs"] == []
+
+
+def test_planned_words_follow_film_order():
+    from helpers import clip, clipdata
+
+    from magicvideo.qc.runner import collect_planned_words
+
+    p = policy()
+    ca = clipdata(clip(cid="c_a"), [(1.0, 1.5, "alpha")], speakers=["PARTNER_A"])
+    cb = clipdata(clip(cid="c_b"), [(1.0, 1.5, "bravo")], speakers=["PARTNER_A"])
+    convs = [{"id": "ma", "clip_id": "c_a", "kind": "conversation", "selected": True, "abs_t0": 100.0,
+              "t0": 0.5, "t1": 3.0},
+             {"id": "mb", "clip_id": "c_b", "kind": "conversation", "selected": True, "abs_t0": 200.0,
+              "t0": 0.5, "t1": 3.0}]
+    timeline = {"segments": [{"clip_id": "c_b", "src_in": 0.0, "frames": 90, "start_frame": 0},
+                             {"clip_id": "c_a", "src_in": 0.0, "frames": 90, "start_frame": 90}]}
+    seg_spans = {"c_a": [(0.0, 3.0)], "c_b": [(0.0, 3.0)]}
+    total, kept, planned = collect_planned_words(convs, {"c_a": ca, "c_b": cb}, seg_spans, timeline, 30.0, p)
+    assert (total, kept) == (2, 2)
+    assert [w for w, _ in planned] == ["bravo", "alpha"]
