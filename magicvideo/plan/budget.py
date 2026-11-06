@@ -77,7 +77,7 @@ def select_event(ev: Event, moments: list[Moment], clips: dict[str, ClipData], p
     tp = [m for m in moments if m.kind in ("third_party", "coverage")
           and (m.cls == "third_party" or (m.kind == "third_party" and _override(m, overrides) == "couple"))]
     for m in tp:
-        if m.kind == "third_party":  # score on the full moment, then keep the best excerpt
+        if m.kind == "third_party" and _override(m, overrides) != "couple":  # score, then keep the best excerpt
             m.score = _third_party_score(m, clips[m.clip_id], policy)
             _trim_excerpt(m, clips[m.clip_id], policy)
     used = 0.0
@@ -85,6 +85,9 @@ def select_event(ev: Event, moments: list[Moment], clips: dict[str, ClipData], p
         rule = _override(m, overrides)
         if rule == "drop":
             m.reason = "dropped in review"
+            continue
+        if rule == "couple" and m.kind == "third_party":  # "this is us": whole moment, not budgeted
+            m.selected, m.reason = True, "kept in review (this is us)"
             continue
         keep = rule in ("keep", "couple")
         if keep or used + eff_len(m) <= tp_budget:
