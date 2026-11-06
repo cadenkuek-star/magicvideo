@@ -165,6 +165,8 @@ insta360:
   pitch_limit_deg: 25
 
 qc:
+  fold_chinese_script: true       # compare Simplified and Traditional as the same (needs zhconv)
+  speech_missing_run_min: 3        # report runs of at least this many unheard planned tokens
   couple_word_retention_min: 0.98   # planned: partner words kept in the timeline
   rendered_word_match_min: 0.90     # independent re-transcription of the master (ASR noise allowed)
   unhidden_conversation_jump_cuts_max: 0

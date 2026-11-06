@@ -14,7 +14,7 @@ from ..project import Project, ProjectError
 from ..render import audio as A
 from ..util import read_json, version_of, vtag, write_json
 from ..plan.assemble import display_orientation
-from ..plan.data import PARTNERS, is_couple_speaker, load_clip
+from ..plan.data import is_couple_speaker, load_clip
 
 PASS, FAIL, SKIPPED = "PASS", "FAIL", "SKIPPED"
 
@@ -116,6 +116,75 @@ def _norm(w: str) -> str:
     return _NORM.sub("", w.lower())
 
 
+_CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]")
+_CJK_SPLIT = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff]|[A-Za-z0-9]+")
+
+
+def speech_tokens(words: list[str], fold: bool) -> list[str]:
+    """Comparison tokens: CJK/kana words become single characters, other words stay whole."""
+    conv = None
+    if fold:
+        try:
+            import zhconv  # type: ignore
+            conv = lambda ch: zhconv.convert(ch, "zh-hans")  # noqa: E731
+        except ImportError:
+            conv = None
+    out: list[str] = []
+    for w in words:
+        n = _norm(w)
+        if not n:
+            continue
+        if not _CJK.search(n):
+            out.append(n)
+            continue
+        for tok in _CJK_SPLIT.findall(n):
+            out.append(conv(tok) if conv and _CJK.match(tok) else tok)
+    return out
+
+
+def rendered_speech_check(planned: list[tuple[str, float]], heard: list[str], fold: bool, min_run: int) -> dict:
+    """Compare planned partner words (word, master time) with what the master sounds like."""
+    try:
+        import zhconv  # type: ignore  # noqa: F401
+        folded = bool(fold)
+    except ImportError:
+        folded = False
+    p_tok: list[str] = []
+    p_time: list[float] = []
+    for w, t in planned:
+        for tok in speech_tokens([w], fold):
+            p_tok.append(tok)
+            p_time.append(t)
+    h_tok = speech_tokens(heard, fold)
+    sm = difflib.SequenceMatcher(a=p_tok, b=h_tok, autojunk=False)
+    hit = [False] * len(p_tok)
+    for b in sm.get_matching_blocks():
+        for i in range(b.a, b.a + b.size):
+            hit[i] = True
+    matched = sum(hit)
+    runs: list[dict] = []
+    i = 0
+    while i < len(hit):
+        if hit[i]:
+            i += 1
+            continue
+        j = i
+        while j < len(hit) and not hit[j]:
+            j += 1
+        if j - i >= min_run:
+            runs.append({"t0": round(p_time[i], 1), "t1": round(p_time[j - 1], 1), "text": " ".join(p_tok[i:j])})
+        i = j
+    return {"ratio": (matched / len(p_tok)) if p_tok else 0.0, "matched": matched, "total": len(p_tok),
+            "folded": folded, "missing_runs": runs}
+
+
+def _master_time(timeline: dict, fps: float, clip_id: str, t: float) -> float | None:
+    for s in timeline["segments"]:
+        if s["clip_id"] == clip_id and s["src_in"] <= t < s["src_in"] + s["frames"] / fps:
+            return s["start_frame"] / fps + (t - s["src_in"])
+    return None
+
+
 def _covered(seg_spans: dict[str, list[tuple[float, float]]], clip_id: str, t: float) -> bool:
     return any(a <= t < b for a, b in seg_spans.get(clip_id, []))
 
@@ -135,7 +204,7 @@ def editorial(project: Project, plan: dict, timeline: dict, policy: Policy, mast
 
     # planned partner-word retention over kept conversations
     total = kept = 0
-    planned_words: list[str] = []
+    planned_words: list[tuple[str, float]] = []
     convs = [m for m in plan["moments"] if m["kind"] == "conversation" and m["selected"]]
     for m in sorted(convs, key=lambda m: m["abs_t0"]):
         cd = cds[m["clip_id"]]
@@ -144,9 +213,11 @@ def editorial(project: Project, plan: dict, timeline: dict, policy: Policy, mast
                 continue
             w = cd.words[i]
             total += 1
-            if _covered(seg_spans, m["clip_id"], (w["t0"] + w["t1"]) / 2):
+            mid = (w["t0"] + w["t1"]) / 2
+            if _covered(seg_spans, m["clip_id"], mid):
                 kept += 1
-                planned_words.append(_norm(w["w"]))
+                planned_words.append((w["w"], _master_time(timeline, fps, m["clip_id"], mid) or 0.0))
+    planned_words.sort(key=lambda x: x[1])
     dropped = [m["id"] for m in plan["moments"] if m["kind"] == "conversation" and not m["selected"]]
     lim = float(policy("qc.couple_word_retention_min"))
     if total == 0:
@@ -164,13 +235,19 @@ def editorial(project: Project, plan: dict, timeline: dict, policy: Policy, mast
         from ..analysis import asr
         wav = project.qc_dir / f"{master.stem}_16k.wav"
         ffmpeg.extract_audio(master, wav)
-        heard = [_norm(w["w"]) for w in asr.transcribe(wav, policy)["words"]]
+        heard = [w["w"] for w in asr.transcribe(wav, policy)["words"]]
         wav.unlink(missing_ok=True)
-        sm = difflib.SequenceMatcher(a=planned_words, b=[h for h in heard if h], autojunk=False)
-        matched = sum(b.size for b in sm.get_matching_blocks())
-        r = matched / len(planned_words)
-        out.append(check("speech.partner_words_rendered", PASS if r >= lim_r else FAIL, round(r, 4), f">= {lim_r}",
-                         f"{matched}/{len(planned_words)} planned partner words heard in the rendered master"))
+        fold = bool(policy("qc.fold_chinese_script"))
+        res = rendered_speech_check(planned_words, heard, fold, int(policy("qc.speech_missing_run_min")))
+        report = project.qc_dir / f"{master.stem}_speech.json"
+        write_json(report, {"planned": speech_tokens([w for w, _ in planned_words], fold),
+                            "heard": speech_tokens(heard, fold), "result": res})
+        detail = (f"{res['matched']}/{res['total']} planned partner characters/words heard; "
+                  f"{len(res['missing_runs'])} unheard runs (see {report.name})")
+        if fold and not res["folded"]:
+            detail += "; script folding off (pip install zhconv)"
+        out.append(check("speech.partner_words_rendered", PASS if res["ratio"] >= lim_r else FAIL,
+                         round(res["ratio"], 4), f">= {lim_r}", detail))
     except Exception as e:
         out.append(check("speech.partner_words_rendered", SKIPPED, None, f">= {lim_r}", f"not run: {e}"[:200]))
 
