@@ -93,3 +93,13 @@ def test_missing_timezone_database_warns_and_keeps_camera_time(monkeypatch, capl
 ])
 def test_filename_time_with_prefix(name, expected):
     assert filename_time(name) == expected
+
+
+@pytest.mark.parametrize("name", ["026_VID_20260919_110940_00_004.insv", "034_DJI_20260420183356_0035_D.MP4"])
+def test_prefixed_names_group_and_detect(name):
+    from magicvideo.ingest import detect_camera, insta360_key
+
+    if name.endswith(".insv"):
+        assert insta360_key(name) == ("20260919_110940_004", "vid")
+    else:
+        assert detect_camera(name, ".mp4", {})["make"] == "DJI"
