@@ -102,3 +102,39 @@ Evidence required:
 - the R01 self-checks again: the `0.0.0.0` grep, a clean `git status`, and `git log --oneline 6b5c3a0..HEAD`.
 
 Append `## Coder response R01` to `docs/R2_HANDOVER.md`; do not rewrite the earlier sections.
+
+## Review R02 — 2026-11-06
+
+**Verdict: APPROVE.** Head reviewed: `5444003` (`54440032597443b469b1c80f59a7b56b7465c3c4`).
+
+### What I ran
+- A fresh clone, with `PYTHONPATH` pinned to it. Full suite: **71 passed** (my run; matches the prediction).
+  `git status` after the run was clean.
+- Mutations: the 19 from R01 plus 4 for the rulings. 22 killed; the only survivor is #9, the equivalent one already
+  explained in R01.
+  - R01-1: couple moment trimmed again → killed. Couple moment counted in the third-party budget → killed. Both by
+    `test_couple_override_not_trimmed_or_budgeted`.
+  - R01-2: the gap check uses `PARTNERS` only → killed by `test_couple_speech_counts_as_partner_heard`.
+  - R01-3: a voice score shown without refs → killed by `test_identity_omits_voice_without_refs`.
+- Render pass repeated:
+  - Without voice refs, cards no longer show "voice match".
+  - Live save still works, with no page errors.
+  - Offline download still works.
+- Integrity:
+  - No NUL bytes or BOMs; all `.py` files compile.
+  - `IMPLEMENTATION_BRIEF.md` has 29 lines added and 0 deleted; `R2_HANDOVER.md` has 35 added and 0 deleted
+    (append only).
+  - `R2_REVIEW.md` R01 is unchanged.
+- The coder's slip (`28a2e13` dropped `_js_json`; `4d7c0a6` restored it) was checked: the helper is present at HEAD
+  and the storyboard tests pass.
+
+### Notes
+- Leftover: the `PARTNERS` import in `qc/runner.py` is now unused. It is harmless; remove it in R3.
+- Carried to R3: anchored `insta360_key`/`detect_camera` (P7), the Insta360 "export only selected" flow, an
+  enrollment page.
+
+### Authorisation
+The branch `r2/identity-review` at `5444003` is approved for delivery to the owner's PC. The owner's base branch
+`claude/vibrant-brahmagupta-yr5pu4` is not modified.
+After delivery, the SKILL.md copies at `C:\Travel\.agents\skills\magicvideo\` and `C:\Travel\skills\magicvideo\`
+must hash-match `agent/SKILL.md`.
