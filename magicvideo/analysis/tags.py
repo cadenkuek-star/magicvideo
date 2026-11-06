@@ -143,6 +143,8 @@ class Tagger:
         self.anthropic = anthropic
         key_env = policy("cloud.api_key_env")
         key = os.environ.get(key_env) if key_env else None
+        if not key and not os.environ.get("ANTHROPIC_API_KEY") and not os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+            raise BackendMissing("no Anthropic key: set cloud.provider: agent (default) or set ANTHROPIC_API_KEY")
         # without an explicit key the SDK resolves ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN / `ant auth login`
         self.client = anthropic.Anthropic(api_key=key) if key else anthropic.Anthropic()
         self.model = policy("cloud.model") or DEFAULT_MODEL
