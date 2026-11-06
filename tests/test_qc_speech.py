@@ -51,3 +51,37 @@ def test_planned_words_follow_film_order():
     total, kept, planned = collect_planned_words(convs, {"c_a": ca, "c_b": cb}, seg_spans, timeline, 30.0, p)
     assert (total, kept) == (2, 2)
     assert [w for w, _ in planned] == ["bravo", "alpha"]
+
+
+def _seg(cid, start, frames=30):
+    return {"clip_id": cid, "start_frame": start, "frames": frames}
+
+
+def test_language_spans_merge_same_language():
+    from magicvideo.qc.runner import language_spans
+
+    spans = language_spans([_seg("a", 0), _seg("b", 60)], {"a": "zh", "b": "zh"}, 30.0, 2.0)
+    assert spans == [{"t0": 0.0, "t1": 3.0, "lang": "zh"}]
+
+
+def test_language_spans_split_on_language_change():
+    from magicvideo.qc.runner import language_spans
+
+    spans = language_spans([_seg("a", 0), _seg("b", 30), _seg("c", 60)], {"a": "en", "b": "zh", "c": "zh"},
+                           30.0, 2.0)
+    assert spans == [{"t0": 0.0, "t1": 1.0, "lang": "en"}, {"t0": 1.0, "t1": 3.0, "lang": "zh"}]
+
+
+def test_transcribe_passes_language(monkeypatch):
+    from magicvideo.analysis import asr
+
+    seen = {}
+
+    class Stub:
+        def transcribe(self, path, **kw):
+            seen.update(kw)
+            return iter([]), type("I", (), {"language": "en"})()
+
+    monkeypatch.setattr(asr, "load_model", lambda policy: Stub())
+    asr.transcribe("x.wav", policy(), language="en")
+    assert seen["language"] == "en"
