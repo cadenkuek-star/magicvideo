@@ -73,3 +73,30 @@ Evidence required:
 - `git log --oneline 66e7267..HEAD` and `git status --short`.
 
 Append `## Coder response R01` to `docs/R3_HANDOVER.md`.
+
+## Review R02 — 2026-11-06
+
+**Verdict: APPROVE.** Head reviewed: `2d1c332` (`2d1c3329e7a790ee195304e6b35e90740f949122`).
+
+### What I ran
+- Fresh clone. Full suite: **91 passed** (my run; matches the prediction). `git status` after the run was clean.
+  `R3_REVIEW.md` R01 is unchanged.
+- The two R01 survivors were re-run on the new head and are now killed:
+  - mutation 7 by `test_edge_speech_uses_last_word_not_moment_edge`;
+  - mutation 14 by `test_planned_words_follow_film_order`.
+- The `qc/runner.py` diff since R01 is a verbatim move of the planned-word loop into `collect_planned_words`,
+  plus the call; no logic changed.
+
+### Authorisation
+The branch `r3/speech-qc-x6` at `2d1c332` is approved to fast-forward `claude/vibrant-brahmagupta-yr5pu4`
+(currently `2c0f6d6`) on the owner's PC, and to be pushed to origin.
+
+Markers:
+- **contains:** `def rendered_speech_check` in `magicvideo/qc/runner.py`; `def drop_hallucinations` in
+  `magicvideo/plan/data.py`; `def x6_export_list` in `magicvideo/plan/planner.py`; `plan_unstitched: true` in
+  `magicvideo/default_policy.yaml`.
+- **absent:** `_INSTA_RE.match(` and `_DJI_RE.match(` in `magicvideo/ingest.py`.
+
+After the merge, the SKILL.md copies at `C:\Travel\.agents\skills\magicvideo\` and
+`C:\Travel\skills\magicvideo\` must match `agent/SKILL.md`, which gained the Insta360 and plan-warning
+sections.
