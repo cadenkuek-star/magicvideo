@@ -170,3 +170,23 @@ def test_edge_speech_uses_last_word_not_moment_edge():
     m = Moment(id="m1", clip_id=cd.id, kind="conversation", t0=0.5, t1=23.0, abs_t0=0.5, cls="couple",
                selected=True)
     assert edge_speech_warnings([m], {cd.id: cd}, policy()) == []
+
+
+def test_edge_speech_skips_camera_originals():
+    from magicvideo.plan.planner import edge_speech_warnings
+
+    cd = clipdata(clip(cid="c_la", duration=23.1, capture_source="filename"),
+                  [(15.0, 16.0, "a"), (20.5, 21.7, "end")], speakers=[A, B])
+    conv = conversations(cd, policy())
+    assert conv and edge_speech_warnings(conv, {cd.id: cd}, policy()) == []
+    on = policy(moments={"edge_speech": {"camera_originals": True}})
+    assert len(edge_speech_warnings(conv, {cd.id: cd}, on)) == 1
+
+
+def test_edge_speech_still_warns_for_exports():
+    from magicvideo.plan.planner import edge_speech_warnings
+
+    cd = clipdata(clip(cid="c_la", duration=23.1, capture_source="mtime"),
+                  [(15.0, 16.0, "a"), (20.5, 21.7, "end")], speakers=[A, B])
+    conv = conversations(cd, policy())
+    assert len(edge_speech_warnings(conv, {cd.id: cd}, policy())) == 1
