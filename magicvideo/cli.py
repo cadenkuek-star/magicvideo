@@ -135,7 +135,19 @@ def cmd_run(a: argparse.Namespace) -> int:
     return {"PASS": 0, "FAIL": 2, "INCOMPLETE": 3}[v]
 
 
+def _utf8_console(streams=None) -> None:
+    """Make stdout/stderr UTF-8 so Japanese/Chinese text and curly quotes print on any console; never raises."""
+    for stream in (streams if streams is not None else (sys.stdout, sys.stderr)):
+        try:
+            reconfigure = getattr(stream, "reconfigure", None)
+            if reconfigure:
+                reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _utf8_console()
     ap = argparse.ArgumentParser(prog="magicvideo", description="Couple travel film pipeline")
     ap.add_argument("--version", action="version", version=__version__)
     ap.add_argument("-v", "--verbose", action="store_true")
