@@ -66,3 +66,26 @@ $ git grep -n "PARTNERS" -- magicvideo/qc/runner.py
 - The X6 flow on real `.insv`/`.lrv`; Whisper's `no_speech_prob`/`avg_logprob` on real footage (the segment fields are read with `getattr`, untested against faster-whisper).
 - The `Renderer` refusal path was tested with a patched export list and an empty timeline, not a real render.
 - The mutation list in brief section 5 was not run (reviewer's job).
+
+## Coder response R01
+
+Review `docs/R3_REVIEW.md` committed unchanged first (`d822d61`). Same branch; nothing pushed or merged.
+
+| Ruling | Test commit | Fix commit | What changed |
+| --- | --- | --- | --- |
+| R01-1 | `ca7f34c` | none (test only) | `test_edge_speech_uses_last_word_not_moment_edge`; it passed against the current code, no production change. |
+| R01-2 | `b2b9836` | `48a5d58` | `qc/runner.py::collect_planned_words` extracted from `editorial` unchanged; `test_planned_words_follow_film_order`. The test commit alone fails at import, as expected. |
+
+Full suite (run once, at the end): `91 passed in 20.75s`; `pytest --collect-only -q`: `91 tests collected` (matches the prediction).
+
+```
+$ git status --short
+(clean, taken before this section was committed)
+$ git log --oneline 66e7267..HEAD   (before the handover commit)
+48a5d58 fix(R01-2): extract collect_planned_words from editorial (no behaviour change)
+b2b9836 test(R01-2): planned words follow film order
+ca7f34c test(R01-1): edge speech uses the last word, not the moment edge
+d822d61 docs: R3 review R01
+```
+
+Parked: none. Note: in `tests/test_qc_speech.py` I added a `from helpers import policy` import at the top for the new test.
