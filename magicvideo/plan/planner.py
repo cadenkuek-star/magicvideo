@@ -5,9 +5,9 @@ import hashlib
 from pathlib import Path
 
 from .. import ingest
-from ..enroll import load_refs
+from ..enroll import load_refs, refs_fingerprint
 from ..project import Project
-from ..util import dumps, log, next_version, vtag, write_json
+from ..util import dumps, log, next_version, read_json, vtag, write_json
 from .assemble import build_timeline
 from .budget import eff_len, select_all
 from .data import ClipData, load_clip
@@ -70,6 +70,7 @@ def make_plan(project: Project) -> dict:
     policy_hash = hashlib.sha256(dumps(policy.data).encode()).hexdigest()[:16]
     plan = {
         "version": 1, "name": project.name, "policy_sha": policy_hash,
+        "refs_sha256": refs_fingerprint(project.people_dir),
         "warnings": warnings,
         "stats": {"clips": len(cds), "moments": len(moments), "selected": len(selected),
                   "planned_seconds": total, "shares": shares,
@@ -79,6 +80,23 @@ def make_plan(project: Project) -> dict:
         "moments": [m.to_dict() for m in moments],
     }
     return {"plan": plan, "timeline": timeline}
+
+
+STALE_REFS_TEXT = "Your partner references changed after this plan was made. Run magicvideo plan again."
+
+
+def stale_refs(project: Project, plan: dict) -> bool:
+    """True when the partner references differ from the ones the plan was made with."""
+    return plan.get("refs_sha256") != refs_fingerprint(project.people_dir)
+
+
+def warn_if_stale(project: Project, tag: str) -> bool:
+    """Log a warning when plan <tag> is older than the partner references; returns whether it is stale."""
+    plan = read_json(project.plan_dir / f"plan_{tag}.json")
+    stale = bool(plan) and stale_refs(project, plan)
+    if stale:
+        log.warning("%s", STALE_REFS_TEXT)
+    return stale
 
 
 def run_plan(project: Project, thumbs: bool = False) -> dict[str, Path]:

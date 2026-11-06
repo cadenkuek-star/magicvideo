@@ -15,7 +15,7 @@ import yaml
 from . import ffmpeg, ingest
 from .analysis.views360 import analysis_view_filter, view_yaws
 from .project import Project, ProjectError
-from .util import read_json, safe_name, write_json
+from .util import read_json, safe_name, sha256_file, write_json
 
 REVIEW_TEXT = """\
 # Who are the two of you?  (takes ~5 minutes, once)
@@ -430,6 +430,12 @@ def _write_enrollment(paths: dict, data: dict) -> None:
     old.update(data)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(yaml.safe_dump(old, sort_keys=True), encoding="utf-8")
+
+
+def refs_fingerprint(people_dir: Path) -> str | None:
+    """sha256 (hex) of refs.npz, or None when there are no references yet."""
+    p = Path(people_dir) / "refs.npz"
+    return sha256_file(p) if p.exists() else None
 
 
 def load_refs(people_dir: Path) -> dict | None:

@@ -71,8 +71,12 @@ def cmd_plan(a: argparse.Namespace) -> int:
 
 
 def cmd_render(a: argparse.Namespace) -> int:
+    from .plan.planner import warn_if_stale
     from .render.renderer import Renderer
-    outputs = Renderer(Project(Path(a.work)), a.plan).run()
+    p = Project(Path(a.work))
+    r = Renderer(p, a.plan)
+    warn_if_stale(p, r.tag)
+    outputs = r.run()
     print(f"master    : {outputs['master']}")
     for c in outputs["chapters"]:
         print(f"chapter   : {c}")
