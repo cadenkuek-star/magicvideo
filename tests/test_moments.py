@@ -160,3 +160,13 @@ def test_edge_speech_quiet_when_there_is_room():
     cd = clipdata(clip(duration=23.1), [(1.0, 1.5, "a"), (17.0, 18.0, "b")], speakers=[A, B])
     sel = conversations(cd, policy())
     assert sel and edge_speech_warnings(sel, {cd.id: cd}, policy()) == []
+
+
+def test_edge_speech_uses_last_word_not_moment_edge():
+    from magicvideo.plan.model import Moment
+    from magicvideo.plan.planner import edge_speech_warnings
+
+    cd = clipdata(clip(duration=23.1), [(1.0, 1.5, "a"), (19.0, 20.0, "b")], speakers=[A, B])
+    m = Moment(id="m1", clip_id=cd.id, kind="conversation", t0=0.5, t1=23.0, abs_t0=0.5, cls="couple",
+               selected=True)
+    assert edge_speech_warnings([m], {cd.id: cd}, policy()) == []
