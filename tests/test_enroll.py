@@ -119,3 +119,17 @@ def test_multi_reference_uses_best_match():
     assert label_windows(emb, windows, only_centroid, policy()) == ["OTHER"]
     multi = {**only_centroid, "voice_a_all": a_rows, "voice_b_all": b[None, :]}
     assert label_windows(emb, windows, multi, policy()) == [PARTNER_A]
+
+
+def test_finalize_without_assignment_unchanged(tmp_path, monkeypatch):
+    p = _project(tmp_path, {"voice_001": [(A_DIR, "c1"), (A_DIR, "c2"), (A_DIR, "c3")],
+                            "voice_002": [(B_DIR, "c1"), (B_DIR, "c2"), (B_DIR, "c3")]})
+    consulted = []
+    real = enroll._voice_face_swap
+    monkeypatch.setattr(enroll, "_voice_face_swap", lambda *a: (consulted.append(1), real(*a))[1])
+    report = enroll.finalize(p)
+    assert report["voices"] == "approved from ['voice_001', 'voice_002']"
+    assert consulted == [1]
+    assert report["voice_face_link"].startswith("not verified")
+    refs = _refs(p)
+    assert refs["voice_a_all"].shape == (3, 4) and refs["voice_b_all"].shape == (3, 4)
