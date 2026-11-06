@@ -62,7 +62,7 @@ def test_word_present_finds_late_and_early_words():
         assert ok and corr > 0.95, shift
 
 
-def _files(tmp_path, silent_master, late_ms=0):
+def _files(tmp_path, silent_master, late_ms=0, master_db=0.0):
     rng = np.random.default_rng(3)
     x = np.zeros(3 * SR, np.float32)
     for a, b in ((0.5, 0.8), (1.5, 1.9)):
@@ -73,7 +73,7 @@ def _files(tmp_path, silent_master, late_ms=0):
     src = tmp_path / "src.wav"
     ffmpeg.run(["-y", "-v", "error", "-f", "f32le", "-ar", str(SR), "-ac", "1", "-i", str(raw), str(src)])
     master = tmp_path / "master.mp4"
-    afilter = f"adelay={1000 + late_ms},volume=0" if silent_master else f"adelay={1000 + late_ms}"
+    afilter = f"adelay={1000 + late_ms},volume=0" if silent_master else f"adelay={1000 + late_ms},volume={master_db}dB"
     ffmpeg.run(["-y", "-v", "error", "-f", "lavfi", "-i", "color=black:s=64x64:r=10:d=4", "-i", str(src),
                 "-af", afilter, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
                 "-t", "4", str(master)])
@@ -99,3 +99,11 @@ def test_signal_presence_master_slightly_late(tmp_path):
     master, words, inv = _files(tmp_path, False, late_ms=20)
     res = signal_word_presence(master, words, inv, {}, policy())
     assert res["ratio"] == 1.0 and res["total"] == 2
+
+
+def test_signal_presence_uses_dialogue_gain(tmp_path):
+    master, words, inv = _files(tmp_path, False, master_db=-20.0)
+    log = {"loudness": {"dialogue_gains_db": {"s1": -20.0}}}
+    assert signal_word_presence(master, words, inv, log, policy())["ratio"] == 1.0
+    assert signal_word_presence(master, words, inv, {}, policy())["ratio"] == 0.0
+
