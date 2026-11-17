@@ -42,6 +42,14 @@ def display_orientation(clip: dict, rotate: int = 0) -> str:
     return "portrait" if h > w else ("square" if h == w else "landscape")
 
 
+def clip_rotation(cd: ClipData, overrides: dict) -> int:
+    """Extra rotation applied to a clip: the owner's override, else the content-detected one."""
+    rule = (overrides.get("clips") or {}).get(cd.id) or {}
+    if "rotate" in rule:
+        return int(rule["rotate"]) % 360
+    return cd.auto_rotate
+
+
 def choose_orientation(policy: Policy, selected: list[Moment], clips: dict[str, ClipData], overrides: dict) -> str:
     setting = policy("output.orientation")
     if setting in ("landscape", "portrait"):
@@ -51,8 +59,7 @@ def choose_orientation(policy: Policy, selected: list[Moment], clips: dict[str, 
         cd = clips[m.clip_id]
         if cd.is360 or m.kind not in ("conversation", "action"):
             continue
-        rot = int(((overrides.get("clips") or {}).get(m.clip_id) or {}).get("rotate", 0))
-        o = display_orientation(cd.clip, rot)
+        o = display_orientation(cd.clip, clip_rotation(cd, overrides))
         if o == "portrait":
             portrait += eff_len(m)
         else:
@@ -136,7 +143,9 @@ def _reframe(cd: ClipData, t0: float, t1: float, kind: str, frames: int, fps: fl
         spec.update({"mode": "fill", "cx": round(cx, 3), "cy": round(cy, 3)})
         return spec
     short = min(cd.clip.get("display_w", 0), cd.clip.get("display_h", 0))
-    if short >= int(policy("reframe.min_crop_short_side")):
+    pref = str(policy("reframe.portrait_in_landscape")) if master == "landscape" else "auto"
+    crop = pref == "crop" or (pref in ("auto", "drop") and short >= int(policy("reframe.min_crop_short_side")))
+    if crop:
         spec.update({"mode": "crop", "cx": round(cx, 3), "cy": round(cy, 3)})
     else:
         spec.update({"mode": "static_bg", "bg_t": round((t0 + t1) / 2, 3)})
@@ -161,7 +170,7 @@ def build_timeline(name: str, selected: list[Moment], all_moments: list[Moment],
     shorten = float(policy("moments.conversation.shorten_pause_to_s"))
     defect_min = float(policy("assembly.defect_min_s"))
     pool = CoverPool(all_moments, cover_len)
-    rot_of = {cid: int((rule or {}).get("rotate", 0)) for cid, rule in (overrides.get("clips") or {}).items()}
+    rot_of = {cid: clip_rotation(cd, overrides) for cid, cd in clips.items()}
 
     # pre-pass: pick a cutaway for every shortenable pause (may move a selected shot of the same event)
     pause_cover: dict[tuple[str, float], Moment] = {}

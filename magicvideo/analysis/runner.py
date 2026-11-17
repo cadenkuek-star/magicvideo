@@ -8,10 +8,10 @@ import numpy as np
 from .. import ffmpeg, ingest
 from ..project import Project
 from ..util import log, read_json, write_json
-from . import asr, faces, quality, tags, voices
+from . import asr, faces, orient, quality, tags, voices
 from .asr import BackendMissing
 
-ALL_STEPS = ["quality", "asr", "voices", "faces", "tags"]
+ALL_STEPS = ["quality", "asr", "voices", "faces", "orient", "tags"]
 AWAITING_AGENT = "skipped: awaiting agent tags"
 
 
@@ -52,8 +52,11 @@ def run_analysis(project: Project, steps: list[str] | None = None, force: bool =
             raise BackendMissing(unavailable[step])
         if step not in backends:
             try:
-                if step == "faces":
-                    backends[step] = faces.load_backend(policy)
+                if step in ("faces", "orient"):
+                    if "faces" in backends:
+                        backends[step] = backends["faces"]
+                    else:
+                        backends[step] = backends["faces"] = faces.load_backend(policy)
                 elif step == "tags":
                     backends[step] = tags.Tagger(policy)
                 elif step == "asr":
@@ -105,6 +108,15 @@ def run_analysis(project: Project, steps: list[str] | None = None, force: bool =
                     data, emb = faces.analyze(apath, clip, policy)
                     write_json(adir / "faces.json", data)
                     np.save(adir / "face_emb.npy", emb)
+                elif step == "orient":
+                    if not policy("orientation.auto_detect"):
+                        raise BackendMissing("orientation.auto_detect is false")
+                    if clip.get("analysis_projection", clip.get("projection", "flat")) != "flat":
+                        write_json(adir / "orient.json", {"backend": "none", "frames": 0, "rotate": 0, "scores": {}})
+                        project.set_step_status(cid, step, "skipped:360 clip")
+                        summary[step]["skipped"] += 1
+                        continue
+                    write_json(adir / "orient.json", orient.analyze(apath, clip, policy, backend("orient")))
                 elif step == "tags" and policy("cloud.provider") == "agent":
                     if not policy("cloud.scene_tagging"):
                         raise BackendMissing("cloud.scene_tagging is false")
@@ -124,7 +136,7 @@ def run_analysis(project: Project, steps: list[str] | None = None, force: bool =
             except BackendMissing as e:
                 project.set_step_status(cid, step, f"skipped:{e}")
                 summary[step]["skipped"] += 1
-                if step in ("asr", "voices", "faces", "tags") and "needs transcript" not in str(e):
+                if step in ("asr", "voices", "faces", "orient", "tags") and "needs transcript" not in str(e):
                     unavailable.setdefault(step, str(e))  # e.g. bad API key: do not retry on every clip
             except Exception as e:  # keep going; the failure is recorded per clip
                 log.exception("%s failed for %s", step, clip["rel_path"])

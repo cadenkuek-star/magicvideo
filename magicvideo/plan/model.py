@@ -44,6 +44,9 @@ class Moment:
     reason: str = ""
     max_len: float | None = None  # cap (e.g. silent solo shot)
     identity: dict = field(default_factory=dict)  # speaker-identity evidence (voice score, stranger, assumed couple)
+    retake_group: str | None = None   # rtNNN when this moment is one of several takes of the same thing
+    retake_of: str | None = None      # id of the best take (None = this is the best take)
+    flags: list[str] = field(default_factory=list)  # e.g. portrait, rotated:180, short
 
     @property
     def dur(self) -> float:

@@ -33,6 +33,7 @@ class ClipData:
     asr_done: bool = False
     window_evidence: list[dict] = field(default_factory=list)
     dropped_speech: list[dict] = field(default_factory=list)
+    auto_rotate: int = 0        # content-detected extra rotation (orient.json); overrides win
 
     @property
     def id(self) -> str:
@@ -201,6 +202,9 @@ def load_clip(project, clip: dict, refs: dict | None, policy: Policy) -> ClipDat
     tj = read_json(adir / "tags.json")
     if tj is not None:
         cd.tags = tj.get("frames", [])
+    oj = read_json(adir / "orient.json")
+    if oj is not None and policy("orientation.auto_detect"):
+        cd.auto_rotate = int(oj.get("rotate", 0)) % 360
     return cd
 
 

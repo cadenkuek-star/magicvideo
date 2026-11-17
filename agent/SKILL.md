@@ -28,6 +28,15 @@ You are the hands and eyes of the pipeline. magicvideo decides the edit. You:
 6. If a command fails twice the same way, stop and report the command and its last 20 lines. No retry loops.
 7. One trip at a time. Don't start the next step while a command is still running.
 
+## What the storyboard badges mean (round 7)
+- `★ best of rtNNN` / `retake rtNNN`: the same line was recorded several times; magicvideo kept the best take and
+  left the others out. The owner can press keep on another take; nothing else is needed.
+- `portrait`, `landscape`, `rotated:180`: the clip's orientation differs from the film, or it was detected
+  sideways/upside down and is rotated automatically. If a clip is rotated wrongly, set
+  `clips: {<clip_id>: {rotate: 0}}` (or 90/180/270) in overrides.yaml and plan again.
+- Portrait B-roll is dropped only when `reframe.portrait_in_landscape: drop` is set in policy.yaml (the owner
+  asked for this on Pakistan 2024); conversations are always kept.
+
 ## Steps for a new trip
 ```
 magicvideo doctor

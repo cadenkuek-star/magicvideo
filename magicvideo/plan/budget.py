@@ -61,20 +61,26 @@ def select_event(ev: Event, moments: list[Moment], clips: dict[str, ClipData], p
     tp_budget = float(budgets["third_party_per_event"])
 
     for m in moments:
-        m.selected, m.reason = False, m.reason if m.reason.startswith("dropped: silent") else ""
+        keep_reason = m.reason.startswith("dropped: silent") or m.reason.startswith("dropped: portrait")
+        m.selected, m.reason = False, m.reason if keep_reason else ""
 
-    # 1. protected couple moments
+    # 1. protected couple moments (a losing retake is not protected unless the owner keeps it)
     for m in moments:
         if m.kind in ("conversation", "action"):
-            if _override(m, overrides) == "drop":
+            rule = _override(m, overrides)
+            if rule == "drop":
                 m.reason = "dropped in review"
+            elif m.retake_of and rule not in ("keep", "couple"):
+                m.reason = f"retake: best take is {m.retake_of}"
             else:
                 m.selected, m.reason = True, "couple moment (protected)"
+                if m.retake_group and not m.retake_of:
+                    m.reason = f"couple moment (best of {m.retake_group})"
     ev.couple_time = sum(eff_len(m) for m in moments if m.selected)
 
     # 2. third-party, best first, within budget
     # a third-party moment the owner marked "couple" has cls couple by now; it is still handled here, like "keep"
-    tp = [m for m in moments if m.kind in ("third_party", "coverage")
+    tp = [m for m in moments if m.kind in ("third_party", "coverage") and "portrait" not in m.reason
           and (m.cls == "third_party" or (m.kind == "third_party" and _override(m, overrides) == "couple"))]
     for m in tp:
         if m.kind == "third_party" and _override(m, overrides) != "couple":  # score, then keep the best excerpt
@@ -98,7 +104,7 @@ def select_event(ev: Event, moments: list[Moment], clips: dict[str, ClipData], p
     ev.third_party_used = used
 
     # 3. coverage via MMR (quality x novelty) up to the event budget
-    cands = [m for m in moments if m.kind == "coverage" and m.max_len != 0.0
+    cands = [m for m in moments if m.kind == "coverage" and m.max_len != 0.0 and "portrait" not in m.reason
              and (m.cls in ("coverage", "transit") or _override(m, overrides) == "couple")]
     lam = float(policy("coverage.mmr_lambda"))
     max_sim = float(policy("coverage.max_similarity"))

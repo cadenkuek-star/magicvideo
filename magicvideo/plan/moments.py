@@ -147,14 +147,16 @@ def _interest(frames: list[dict]) -> float:
 
 def coverage(cd: ClipData, occupied: list[tuple[float, float]], event_type_hint: str, policy: Policy) -> list[Moment]:
     smin, smax = float(policy("coverage.shot_min_s")), float(policy("coverage.shot_max_s"))
+    pmin = min(smin, float(policy("coverage.partner_shot_min_s")))
+    bonus = float(policy("coverage.partner_visible_bonus"))
     step = float(policy("coverage.step_s"))
     margin = float(policy("coverage.margin_s"))
     holes = [(a - margin, b + margin) for a, b in occupied]
     out: list[Moment] = []
     for free in subtract_intervals((0.0, cd.duration), holes):
         for c0, c1 in cd.quality.clean_spans(free[0], free[1], policy):
-            if c1 - c0 < smin:
-                continue
+            if c1 - c0 < smin and (c1 - c0 < pmin or not cd.partners_visible(c0, c1)):
+                continue  # too short, unless one of the partners is on screen
             # candidate windows, then greedy best-first without overlap
             L = min(smax, c1 - c0)
             starts = list(np.arange(c0, c1 - L + 1e-6, step)) or [c0]
@@ -173,6 +175,8 @@ def coverage(cd: ClipData, occupied: list[tuple[float, float]], event_type_hint:
                 tags = sorted({t for f in frames for t in f.get("tags", [])})
                 people = [f.get("people") for f in frames]
                 visible = cd.partners_visible(s, e)
+                if visible:
+                    score = min(1.0, score + bonus)
                 speech = cd.speech_in(s, e)
                 featured_others = (people and people.count("others") > len(people) / 2) or \
                     any(t in ("performance", "guide") for t in tags)

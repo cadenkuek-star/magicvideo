@@ -9,11 +9,12 @@ from .. import ingest
 from ..enroll import load_refs, refs_fingerprint
 from ..project import Project
 from ..util import dumps, log, next_version, read_json, vtag, write_json
-from .assemble import build_timeline
+from .assemble import build_timeline, choose_orientation, clip_rotation, display_orientation
 from .budget import eff_len, select_all
 from .data import ClipData, load_clip
 from .events import build_chapters, build_events
 from .moments import build_clip_moments
+from .retakes import apply_retakes
 from .storyboard import STALE_REFS_TEXT, write_storyboard
 
 
@@ -95,6 +96,25 @@ def edge_speech_warnings(selected: list, cds: dict, policy) -> list[str]:
     return [text for _, _, text in sorted(found, key=lambda x: (x[0], x[1], x[2]))]
 
 
+def flag_orientation(moments: list, cds: dict, master: str, policy, overrides: dict) -> None:
+    """Flag moments from rotated or portrait clips; drop portrait B-roll when the policy says so."""
+    drop = str(policy("reframe.portrait_in_landscape")) == "drop" and master == "landscape"
+    for m in moments:
+        cd = cds[m.clip_id]
+        if cd.is360:
+            continue
+        rot = clip_rotation(cd, overrides)
+        if rot:
+            m.flags.append(f"rotated:{rot}" if rot == cd.auto_rotate and "rotate" not in
+                           ((overrides.get("clips") or {}).get(cd.id) or {}) else f"rotate:{rot}")
+        o = display_orientation(cd.clip, rot)
+        if o != master and o != "square":
+            m.flags.append(o)
+            if drop and m.kind in ("coverage", "third_party"):
+                m.reason = "dropped: portrait clip (reframe.portrait_in_landscape: drop)"
+                m.max_len = 0.0
+
+
 def make_plan(project: Project) -> dict:
     policy = project.policy
     overrides = project.overrides()
@@ -126,6 +146,9 @@ def make_plan(project: Project) -> dict:
             moments.append(m)
     from .budget import apply_overrides
     apply_overrides(moments, cds, overrides)
+    retake_stats = apply_retakes(moments, cds, policy, overrides)
+    master = choose_orientation(policy, [m for m in moments if m.kind in ("conversation", "action")], cds, overrides)
+    flag_orientation(moments, cds, master, policy, overrides)
     warnings += select_all(events, moments, cds, policy, overrides)
     selected = [m for m in moments if m.selected]
     warnings += edge_speech_warnings(selected, cds, policy)
@@ -142,7 +165,9 @@ def make_plan(project: Project) -> dict:
         "refs_sha256": refs_fingerprint(project.people_dir),
         "warnings": warnings,
         "stats": {"clips": len(cds), "moments": len(moments), "selected": len(selected),
-                  "planned_seconds": total, "shares": shares,
+                  "planned_seconds": total, "shares": shares, **retake_stats,
+                  "flagged": {f: sum(1 for m in moments if f in m.flags)
+                              for f in sorted({f for m in moments for f in m.flags})},
                   "raw_seconds": sum(cd.duration for cd in cds.values())},
         "events": [e.to_dict() for e in events],
         "chapters": [c.to_dict() for c in chapters],

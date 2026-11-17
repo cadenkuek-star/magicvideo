@@ -30,3 +30,5 @@ Use a test trip with 5–10 short clips:
 | 12 | 360 virtual camera | watch an X6 conversation | camera on the speaker, slow eased moves, horizon level | |
 | 13 | Rendered speech check | `magicvideo qc` with Whisper installed | `speech.partner_words_rendered` ≥ 0.90 | |
 | 14 | Resolve import | File → Import → Timeline → `output/<Name>_vNNN.otio` | clips link to the original files; V2 cutaways line up | |
+| 15 | Retakes | storyboard header "retakes: N groups" and ★ best / retake badges on a selfie line you recorded more than once | the complete, later take is ★; the others are left out; `keep` rescues one | |
+| 16 | Orientation | `analysis/<clip>/orient.json` of a clip you know is sideways or upside down; its storyboard badge | `rotate` is 90/180/270 and the badge says `rotated:<deg>`; upright clips stay 0 | |

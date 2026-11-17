@@ -30,6 +30,8 @@ body{padding-bottom:64px}.btns button.on{background:var(--ink);color:var(--bg);b
 .meta{color:var(--muted);font-size:12px}.text{font-size:12px;margin-top:4px;max-height:5.6em;overflow:hidden}
 .btns{display:flex;gap:6px;margin-top:6px}button{flex:1;border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:5px;padding:3px 0;cursor:pointer}
 button.k{color:var(--keep)}button.d{color:var(--drop)}code{font-size:11px;word-break:break-all;color:var(--muted)}
+.badges{margin:4px 0 0;display:flex;gap:4px;flex-wrap:wrap}.badge{font-size:11px;padding:1px 6px;border-radius:9px;border:1px solid var(--line);color:var(--muted)}
+.badge.best{color:var(--keep);border-color:var(--keep)}.badge.retake{color:var(--drop);border-color:var(--drop)}.badge.flag{color:#9a6b00;border-color:#9a6b00}
 """
 
 JS = r"""
@@ -128,7 +130,10 @@ def write_storyboard(project, plan: dict, timeline: dict, path: Path, thumbs: bo
             f"<div class=stats>{st['selected']} of {st['moments']} moments · "
             f"{st['planned_seconds'] / 60:.1f} min planned from {st['raw_seconds'] / 60:.1f} min raw · "
             f"couple {sh['couple']['share']:.0%} · coverage {sh['coverage']['share']:.0%} · "
-            f"transit {sh['transit']['share']:.0%} · other people {sh['third_party']['share']:.0%}</div>"
+            f"transit {sh['transit']['share']:.0%} · other people {sh['third_party']['share']:.0%}"
+            + (f" · retakes: {st['retake_groups']} groups, {st['retakes_dropped']} takes left out"
+               if st.get("retake_groups") else "")
+            + "".join(f" · {html.escape(k)}: {v}" for k, v in (st.get("flagged") or {}).items()) + "</div>"
             + "".join(f"<div class=warn>⚠ {html.escape(w)}</div>" for w in plan["warnings"])
             + f"<div id=stale class=stale hidden>{html.escape(STALE_REFS_TEXT)}</div>")
     body = []
@@ -149,6 +154,12 @@ def write_storyboard(project, plan: dict, timeline: dict, path: Path, thumbs: bo
                 img = _thumb(project, clip, m, thumb_dir) if thumbs and clip else None
                 text = _snippet(project, m["clip_id"], m["t0"], m["t1"], cache)
                 mid = html.escape(m["id"])
+                badges = []
+                if m.get("retake_group"):
+                    badges.append(f"<span class='badge best'>★ best of {html.escape(m['retake_group'])}</span>"
+                                  if not m.get("retake_of") else
+                                  f"<span class='badge retake'>retake {html.escape(m['retake_group'])}</span>")
+                badges += [f"<span class='badge flag'>{html.escape(f)}</span>" for f in m.get("flags", [])]
                 body.append(
                     f"<div class='card{'' if m['selected'] else ' off'}' data-id=\"{mid}\">"
                     + (f"<img src='thumbs/{html.escape(img)}' loading=lazy>" if img else "")
@@ -156,6 +167,7 @@ def write_storyboard(project, plan: dict, timeline: dict, path: Path, thumbs: bo
                     f"<div class=meta>{html.escape(clip.get('rel_path', m['clip_id']))} · "
                     f"{m['t0']:.1f}–{m['t1']:.1f}s ({m['dur']:.1f}s)</div>"
                     f"<div class=meta>{html.escape(m['reason'])}</div>"
+                    + (f"<div class=badges>{''.join(badges)}</div>" if badges else "")
                     + (f"<div class=meta>{html.escape(_identity_line(project, m['identity']))}</div>"
                        if m.get("identity") else "")
                     + (f"<div class=text>“{html.escape(text)}”</div>" if text else "")

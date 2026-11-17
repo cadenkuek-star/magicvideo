@@ -34,7 +34,14 @@ review:
   port: 8765                      # `magicvideo review` listens on 127.0.0.1 only
 
 analysis:
-  steps: [quality, asr, voices, faces, tags]
+  steps: [quality, asr, voices, faces, orient, tags]
+
+orientation:                     # sideways / upside-down clips whose metadata is wrong
+  auto_detect: true              # uses the face backend on a few frames at 0/90/180/270 degrees
+  sample_frames: 6
+  frame_px: 640
+  min_faces: 2                   # detections the winning rotation needs
+  min_ratio: 1.5                 # its face score must beat the metadata orientation by this factor
 
 quality:
   sample_fps: 10
@@ -66,7 +73,7 @@ identity:
     backend: speechbrain
     min_similarity: 0.55
     margin: 0.05
-  silent_solo_shot_max_s: {PARTNER_A: 4.0, PARTNER_B: 0.0}   # 0 = drop
+  silent_solo_shot_max_s: {PARTNER_A: 4.0, PARTNER_B: 4.0}   # 0 = drop
 
 voice:
   window_gap_s: 0.5
@@ -84,8 +91,8 @@ moments:
   edge_speech: {start_s: 0.3, end_s: 1.5, camera_originals: false}   # warn if couple speech starts/ends this close to a clip edge; camera_originals: false = camera-named originals can't be trimmed too tight
   conversation:
     join_gap_s: 6.0
-    pre_roll_s: 0.7
-    post_roll_s: 1.5
+    pre_roll_s: 1.5                # reaction kept before the first word
+    post_roll_s: 2.0               # and after the last word
     keep_pause_up_to_s: 2.5
     shorten_pause_to_s: 1.2
     split_pause_over_s: 8.0
@@ -93,17 +100,26 @@ moments:
   action:
     tags: [taste, toast, cheers, reveal, game, dance, purchase]
     partner_window_s: 2.0
-    pre_s: 1.5
+    pre_s: 2.0
     post_s: 3.0
 
 coverage:
   shot_min_s: 3.0
+  partner_shot_min_s: 2.0          # a shot with one of you on screen may be this short
+  partner_visible_bonus: 0.15      # score bonus for shots with a partner on screen
   shot_max_s: 6.0
   step_s: 1.5
   margin_s: 0.5
   mmr_lambda: 0.7
   budget_overshoot_max: 0.15       # never exceed an event's coverage budget by more than this
   max_similarity: 0.92
+
+retakes:                         # the same line recorded several times -> keep the best take
+  enabled: true
+  window_s: 600                  # takes must start within this many seconds of each other (same event)
+  text_similarity_min: 0.6       # transcript token similarity (0..1) that makes two takes the same
+  min_words: 3                   # with fewer words on both sides, compare the picture instead
+  visual_similarity_min: 0.95    # visual descriptor cosine for wordless takes (same partners on screen)
 
 third_party:
   excerpt_max_s: 8.0
@@ -143,6 +159,8 @@ output:
   video: {codec: libx264, crf: 18, preset: slow, profile: high}
 
 reframe:
+  portrait_in_landscape: auto    # auto (crop when large enough, else still blurred background) | static_bg | crop | drop
+                                 # drop = portrait B-roll is left out; your conversations are still kept (flagged for review)
   min_crop_short_side: 1600
   bg_blur_sigma: 30
   bg_brightness: -0.18

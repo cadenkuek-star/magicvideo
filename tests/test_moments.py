@@ -33,7 +33,7 @@ def test_conversation_joins_turns_and_excludes_leading_other():
     convs = conversations(cd, p)
     assert len(convs) == 2                      # 9 s -> 30 s gap > join_gap
     c = convs[0]
-    assert abs(c.t0 - 3.3) < 1e-9                # 0.7 s pre-roll, clear of the guide's leading word
+    assert abs(c.t0 - 2.5) < 1e-9                # 1.5 s pre-roll, snapped clear of the guide's leading word (2.0 + 0.05)
     assert 7.0 <= c.t1 < 8.0                     # post-roll stops before the trailing guide word
     assert c.speakers == ["PARTNER_A", "PARTNER_B"]
 
