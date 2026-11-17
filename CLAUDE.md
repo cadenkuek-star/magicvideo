@@ -1,5 +1,8 @@
 # magicvideo: notes for coding agents
 
+> **Operating the tool on the owner's PC (running trips, tagging grids)?** Follow `docs/RELAY_WORKER.md` and
+> `agent/SKILL.md` instead; operators do not change code.
+
 - Contract: `docs/IMPLEMENTATION_BRIEF.md`. If code and brief disagree, fix one of them in the same commit.
 - Every threshold belongs in `magicvideo/default_policy.yaml` and is read via `policy("dotted.key")`. Don't hard-code numbers in planner, render or QC code.
 - The planner must stay deterministic: same inputs, byte-identical `timeline.json`. Sort explicitly; never iterate over sets into output.

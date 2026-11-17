@@ -1,8 +1,19 @@
 # Relay: resume magicvideo on the owner's PC (new AI worker replacing Antigravity)
 
-You are the new **operator** on the owner's Windows PC. The previous operator (Antigravity) ran out of tokens
-mid-trip. Code changes are made by Claude Code in a separate session; you run the tool, look at images when asked,
-and report. Read this file fully, then do section 3 in order.
+You are the new **operator** on the owner's Windows PC: a **Claude Code** session opened in `C:\Travel\magicvideo`.
+The previous operator (Antigravity) ran out of tokens mid-trip. Code changes are made by a separate Claude Code
+session (the author); you run the tool, look at frame grids when asked (section 6), and report. Read this file
+fully, then do section 3 in order.
+
+**There is no Anthropic API key on this PC, and none is needed.** Scene tagging uses `cloud.provider: agent` (the
+default): magicvideo writes small frame-grid images to disk and *you* look at them with your Read tool and write
+the answers. Never switch a trip to `cloud.provider: anthropic`.
+
+**Model:** run this session on Claude Sonnet 5.5 (`/model sonnet`). It follows the stop points reliably and reads
+images well. Tagging many grids can be handed to cheaper Haiku subagents (section 6.3).
+
+**`CLAUDE.md` in this repo is written for the code author.** As operator you do not change code; where `CLAUDE.md`
+and this relay differ, this relay wins.
 
 ## 1. What this is
 
@@ -94,6 +105,38 @@ magicvideo qc C:\Travel\work\Pakistan_2024
    moment ids and what you saw, plus the policy knob if you know it. Claude changes the code.
 5. A command fails twice the same way: stop, report the command and its last 20 lines.
 6. Never decide who the partners are; never print or store the API key.
+
+## 6. Scene tags (new trips; Pakistan is already tagged)
+
+`magicvideo analyze` ends with `tags: N grids waiting` when there are grids to look at.
+
+**6.1 What a grid is.** `C:\Travel\work\<Trip>\tagging\<clip_id>\grid_NNN.jpg` is a 3×3 image of numbered
+frames (cell 1 top-left, row by row). `tagging\TASKS.md` lists every unanswered grid, the allowed tags and the
+answer format. Read TASKS.md first.
+
+**6.2 Per grid:** open the jpg with the Read tool, then write `grid_NNN.answer.json` in the same folder:
+```json
+{"cells": [{"cell": 1, "tags": ["food", "table"], "people": "partners", "interest": 0.7, "desc": "noodles on the table"}]}
+```
+One entry per numbered cell; `tags` only from the allowed list; `people` one of none / partners / others / crowd /
+mixed (`partners` = the travelling couple, `others` = guides, staff, performers, strangers in focus); `interest`
+0.0–1.0; `desc` at most 12 words, what is visible only, no names or guessed places. Write the file with the Write
+tool; never edit anything under `analysis\`.
+
+**6.3 Many grids (Pakistan had 376): use Haiku subagents.** Split the TASKS.md list into batches of about 20 grids
+and give each batch to a subagent with `model: haiku`, run in the background, at most 4 at a time. Give each one
+this prompt (fill in the paths):
+> Open each of these frame-grid images with the Read tool and write the matching `grid_NNN.answer.json` next to it,
+> exactly as described in `C:\Travel\work\<Trip>\tagging\TASKS.md` (read it first). Write only answer files; change
+> nothing else. Grids: <list of paths>. Reply with the number of files written.
+
+**6.4 Import and check:**
+```powershell
+magicvideo tags import C:\Travel\work\<Trip>
+```
+It lists invalid or missing answers; open those grids yourself (Sonnet), rewrite the answers, import again until it
+reports 0 invalid, 0 missing. Then spot-check 5 random grids yourself against their answers and report any that are
+wrong.
 
 ## 5. Report template (send to the owner, who passes it to Claude)
 
