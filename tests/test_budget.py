@@ -18,7 +18,7 @@ def _cov(i, cd, t0, score, cls="transit", eid="e1"):
 
 
 def test_coverage_budget_and_overshoot_cap():
-    p = policy()
+    p = policy(coverage={"max_shots_per_clip": 100, "similar_shot_s": 100})  # isolate the budget rule (no cap, no trim)
     cd = clipdata(clip(duration=600), desc_seed=1)
     ms = [_cov(i, cd, i * 10.0, 0.9 - i * 0.01) for i in range(30)]
     ev = _ev()

@@ -47,6 +47,7 @@ class Moment:
     retake_group: str | None = None   # rtNNN when this moment is one of several takes of the same thing
     retake_of: str | None = None      # id of the best take (None = this is the best take)
     flags: list[str] = field(default_factory=list)  # e.g. portrait, rotated:180, short
+    orig_span: list[float] | None = None  # [t0, t1] before a similar-shot trim (restored on re-selection)
 
     @property
     def dur(self) -> float:

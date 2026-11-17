@@ -112,6 +112,9 @@ coverage:
   margin_s: 0.5
   mmr_lambda: 0.7
   budget_overshoot_max: 0.15       # never exceed an event's coverage budget by more than this
+  max_shots_per_clip: 2            # B-roll shots taken from one source clip per event
+  similar_threshold: 0.80          # visually similar to a chosen shot (or same clip) ->
+  similar_shot_s: 3.0              #   keep only this many seconds (2-4 s), from the middle
   max_similarity: 0.92
 
 retakes:                         # the same line recorded several times -> keep the best take
@@ -120,6 +123,7 @@ retakes:                         # the same line recorded several times -> keep 
   text_similarity_min: 0.6       # transcript token similarity (0..1) that makes two takes the same
   min_words: 3                   # with fewer words on both sides, compare the picture instead
   visual_similarity_min: 0.95    # visual descriptor cosine for wordless takes (same partners on screen)
+  text_visual_min: 0.6           # takes matched by words must also look alike (cosine), when both have pictures
 
 third_party:
   excerpt_max_s: 8.0
@@ -160,7 +164,7 @@ output:
 
 reframe:
   portrait_in_landscape: auto    # auto (crop when large enough, else still blurred background) | static_bg | crop | drop
-                                 # drop = portrait B-roll is left out; your conversations are still kept (flagged for review)
+                                 # drop = every portrait clip is left out of a landscape film (keep in review rescues one)
   min_crop_short_side: 1600
   bg_blur_sigma: 30
   bg_brightness: -0.18

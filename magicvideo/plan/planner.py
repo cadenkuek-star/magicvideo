@@ -97,7 +97,7 @@ def edge_speech_warnings(selected: list, cds: dict, policy) -> list[str]:
 
 
 def flag_orientation(moments: list, cds: dict, master: str, policy, overrides: dict) -> None:
-    """Flag moments from rotated or portrait clips; drop portrait B-roll when the policy says so."""
+    """Flag moments from rotated or portrait clips; leave portrait clips out when the policy says drop."""
     drop = str(policy("reframe.portrait_in_landscape")) == "drop" and master == "landscape"
     for m in moments:
         cd = cds[m.clip_id]
@@ -110,9 +110,10 @@ def flag_orientation(moments: list, cds: dict, master: str, policy, overrides: d
         o = display_orientation(cd.clip, rot)
         if o != master and o != "square":
             m.flags.append(o)
-            if drop and m.kind in ("coverage", "third_party"):
+            if drop:
                 m.reason = "dropped: portrait clip (reframe.portrait_in_landscape: drop)"
-                m.max_len = 0.0
+                if m.kind in ("coverage", "third_party"):
+                    m.max_len = 0.0  # never selected and never used as a cutaway
 
 
 def make_plan(project: Project) -> dict:

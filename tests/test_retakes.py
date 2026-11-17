@@ -1,3 +1,4 @@
+import numpy as np
 from helpers import clip, clipdata, policy
 
 from magicvideo.analysis.orient import pick_rotation
@@ -19,7 +20,7 @@ def _takes():
     for k, (cid, start, dur) in enumerate((("c_t1", "2026-04-19T10:00:00", 4.0),    # cut off at the end
                                             ("c_t2", "2026-04-19T10:01:00", 12.0),
                                             ("c_t3", "2026-04-19T10:02:00", 12.0))):
-        cds[cid] = clipdata(clip(cid, duration=dur, start=start), line, speakers=[A] * 5, desc_seed=k)
+        cds[cid] = clipdata(clip(cid, duration=dur, start=start), line, speakers=[A] * 5, desc_seed=7)  # same framing
     other = clipdata(clip("c_o", duration=12.0, start="2026-04-19T10:03:00"),
                      [(1.0, 1.5, "look"), (1.6, 2.0, "at"), (2.1, 2.5, "that"), (2.6, 3.0, "mountain")], speakers=[A] * 4)
     cds["c_o"] = other
@@ -128,3 +129,79 @@ def test_orientation_flags_and_portrait_drop():
         m.flags, m.max_len, m.reason = [], None, ""
     flag_orientation(ms, cds, "portrait", p, {"clips": {}})
     assert ms[0].flags == ["landscape"] and ms[1].flags == [] and ms[0].max_len is None
+
+
+def test_one_cjk_word_is_not_three_words_and_text_takes_must_look_alike():
+    from magicvideo.plan.retakes import word_count
+    assert word_count(tokens("专业的")) == 1.5
+    # same three characters in two different shots of one clip: not a retake
+    cd = clipdata(clip("c_z", duration=30, start="2026-04-19T10:00:00"),
+                  [(1.5, 2.0, "专"), (2.0, 2.5, "业"), (2.5, 3.0, "的"), (15.0, 15.5, "专"), (15.5, 16.0, "业"),
+                   (16.0, 16.5, "的")], speakers=[A] * 6)
+    ms = build_clip_moments(cd, "landmark", policy())
+    for m in ms:
+        m.event_id = "e1"
+    assert find_retake_groups(ms, {"c_z": cd}, policy()) == []
+    # same English line, completely different pictures: not a retake either
+    cds, moments = _takes()
+    cds["c_t2"] = clipdata(cds["c_t2"].clip, [(w["t0"], w["t1"], w["w"]) for w in cds["c_t2"].words],
+                           speakers=[A] * 5, desc_seed=99)
+    groups = find_retake_groups(moments, cds, policy())
+    assert all("c_t2" not in {m.clip_id for m in g} for g in groups)
+
+
+def test_similar_shots_are_shortened_and_one_clip_gives_at_most_two():
+    import numpy as np
+    from magicvideo.analysis.quality import QualityTrack
+    from magicvideo.plan.model import Moment
+    n = 600
+    same = np.tile(np.eye(1, 176, 0, dtype=np.float32), (n + 1, 1))   # every second of the scenery looks alike
+    q = QualityTrack({"fps": 10, "t": [i / 10 for i in range(n * 10)], "sharp": [0.6] * (n * 10),
+                      "luma": [0.45] * (n * 10), "white": [0.0] * (n * 10), "black": [0.0] * (n * 10),
+                      "jitter": [0.001] * (n * 10), "desc_t": [float(i) for i in range(n + 1)]}, same)
+    one = clipdata(clip("c_one", duration=n), quality=q)
+    two = clipdata(clip("c_two", duration=n), quality=q)
+    ms = [Moment(id=f"m{i}", clip_id="c_one", kind="coverage", t0=i * 10.0, t1=i * 10.0 + 6, abs_t0=i * 10.0,
+                 score=0.9 - i * 0.01, cls="coverage", event_id="e1") for i in range(6)]
+    ms.append(Moment(id="x", clip_id="c_two", kind="coverage", t0=0, t1=6, abs_t0=100, score=0.5, cls="coverage",
+                     event_id="e1"))
+    p = policy(coverage={"max_similarity": 1.01})  # nothing is a hard duplicate; the similar rule decides
+    select_event(_ev(), ms, {"c_one": one, "c_two": two}, p, {"moments": {}})
+    sel = [m for m in ms if m.selected]
+    assert sum(m.clip_id == "c_one" for m in sel) == 2                       # cap per clip
+    assert [round(m.dur, 3) for m in sel] == [6.0, 3.0, 3.0]                 # first full, similar ones 3 s
+    assert next(m for m in ms if m.id == "m1").t0 == 11.5                   # trimmed from the middle
+    assert any(m.reason == "clip already has 2 shots" for m in ms)
+    select_event(_ev(), ms, {"c_one": one, "c_two": two}, p, {"moments": {}})  # re-selection restores spans
+    assert [round(m.dur, 3) for m in ms if m.selected] == [6.0, 3.0, 3.0]
+
+
+def test_portrait_conversation_is_dropped_unless_kept():
+    from magicvideo.plan.planner import flag_orientation
+    port = clipdata(clip("c_p", duration=20, w=1080, h=1920), [(2, 3, "hello"), (3.2, 4, "there")], speakers=[A, B])
+    ms = build_clip_moments(port, "general", policy())
+    for m in ms:
+        m.event_id = "e1"
+    p = policy(reframe={"portrait_in_landscape": "drop"})
+    flag_orientation(ms, {"c_p": port}, "landscape", p, {"clips": {}})
+    conv = next(m for m in ms if m.kind == "conversation")
+    select_event(_ev(), ms, {"c_p": port}, p, {"moments": {}})
+    assert not conv.selected and conv.reason.startswith("dropped: portrait")
+    assert not any(m.selected for m in ms)
+    select_event(_ev(), ms, {"c_p": port}, p, {"moments": {conv.id: "keep"}})
+    assert conv.selected
+
+
+def test_rotate_180_turns_the_picture_not_mirrors_it(tmp_path):
+    """Render filter for rotate 180 on real pixels: top-left corner must end up bottom-right."""
+    import subprocess
+    from magicvideo import ffmpeg
+    from magicvideo.render.filters import rotate_filters
+    src = tmp_path / "in.png"
+    # white square only in the top-left quarter
+    ffmpeg.run(["-y", "-v", "error", "-f", "lavfi", "-i", "color=black:s=64x32", "-vf",
+                "drawbox=x=0:y=0:w=32:h=16:color=white:t=fill", "-frames:v", "1", str(src)])
+    out = subprocess.run([ffmpeg.ffmpeg_bin(), "-v", "error", "-i", str(src), "-vf", ",".join(rotate_filters(180)),
+                          "-f", "rawvideo", "-pix_fmt", "gray", "-"], capture_output=True).stdout
+    img = np.frombuffer(out, np.uint8).reshape(32, 64)
+    assert img[24, 48] > 200 and img[8, 16] < 50 and img[8, 48] < 50 and img[24, 16] < 50

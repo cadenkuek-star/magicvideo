@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .. import ffmpeg
 from ..analysis.views360 import analysis_view_filter
+from ..render.filters import rotate_filters
 from ..util import read_json, safe_name, version_of, vtag
 
 STALE_REFS_TEXT = "Your partner references changed after this plan was made. Run magicvideo plan again."
@@ -83,15 +84,23 @@ def _snippet(project, clip_id: str, t0: float, t1: float, cache: dict) -> str:
     return text[:220] + ("…" if len(text) > 220 else "")
 
 
+def _rotation(m: dict) -> int:
+    for f in m.get("flags", []):
+        if f.startswith(("rotated:", "rotate:")):
+            return int(f.split(":", 1)[1]) % 360
+    return 0
+
+
 def _thumb(project, clip: dict, m: dict, out_dir: Path) -> str | None:
-    out = out_dir / f"{safe_name(m['id'], 80)}.jpg"
+    rot = _rotation(m)
+    out = out_dir / f"{safe_name(m['id'], 80)}{'_r' + str(rot) if rot else ''}.jpg"
     if not out.exists():
         t = (m["t0"] + m["t1"]) / 2
         proj = clip.get("analysis_projection", clip.get("projection", "flat"))
         if proj in ("equirect", "dual_fisheye"):
             vf = analysis_view_filter(proj, 0.0, 100.0, (320, 180), 200.0)
         else:
-            vf = "scale=320:-2"
+            vf = ",".join(rotate_filters(rot) + ["scale=320:-2"])  # same turn as the render
         try:
             ffmpeg.frame_png(Path(clip["analysis_path"]), t, out, vf=vf)
         except Exception:

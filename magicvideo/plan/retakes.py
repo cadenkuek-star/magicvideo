@@ -29,6 +29,11 @@ def tokens(text: str) -> list[str]:
     return out
 
 
+def word_count(toks: list[str]) -> float:
+    """Words for the min_words rule: a CJK/kana character counts as half a word (one word is ~2 characters)."""
+    return sum(0.5 if _CJK.match(t) else 1.0 for t in toks)
+
+
 def text_similarity(a: list[str], b: list[str]) -> float:
     if not a or not b:
         return 0.0
@@ -77,7 +82,8 @@ def find_retake_groups(moments: list[Moment], clips: dict[str, ClipData], policy
     window = float(policy("retakes.window_s"))
     text_min = float(policy("retakes.text_similarity_min"))
     vis_min = float(policy("retakes.visual_similarity_min"))
-    min_words = int(policy("retakes.min_words"))
+    min_words = float(policy("retakes.min_words"))
+    text_vis = float(policy("retakes.text_visual_min"))
     cands = sorted((m for m in moments if m.kind in ("conversation", "action")), key=lambda m: (m.abs_t0, m.id))
     by_event: dict[str, list[Moment]] = {}
     for m in cands:
@@ -93,10 +99,12 @@ def find_retake_groups(moments: list[Moment], clips: dict[str, ClipData], policy
                 if ms[j].abs_t0 - ms[i].abs_t0 > window:
                     break
                 same = False
-                if len(toks[i]) >= min_words and len(toks[j]) >= min_words:
-                    same = text_similarity(toks[i], toks[j]) >= text_min
-                elif len(toks[i]) < min_words and len(toks[j]) < min_words:
-                    di, dj = descs[i], descs[j]
+                di, dj = descs[i], descs[j]
+                wi, wj = word_count(toks[i]), word_count(toks[j])
+                if wi >= min_words and wj >= min_words:
+                    looks = di is None or dj is None or float(di @ dj) >= text_vis
+                    same = looks and text_similarity(toks[i], toks[j]) >= text_min
+                elif wi < min_words and wj < min_words:
                     same = (di is not None and dj is not None and float(di @ dj) >= vis_min
                             and ms[i].partners_visible == ms[j].partners_visible and ms[i].kind == ms[j].kind)
                 if same:

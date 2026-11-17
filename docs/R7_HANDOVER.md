@@ -60,3 +60,11 @@ Tests: 133 pass here (`pytest -q`), including the end-to-end render.
   `retakes.window_s`; the owner decides.
 - `orient` rotating an upright clip: report the clip and its `orient.json` scores. Knobs: `orientation.min_ratio`,
   `orientation.min_faces`.
+
+## Round 8 (after the owner's v004 review)
+
+Pull again (`git pull`, `pip install -e ".[dev]"`, `pytest -q`: expect 137 passed, 1 skipped), then
+`magicvideo plan C:\Travel\work\Pakistan_2024 --thumbs` and report the new header line. Brief §16 has the rules:
+at most 2 B-roll shots per clip per event, similar shots cut to 3 s, `drop` now leaves portrait conversations out
+too (keep rescues), the `rt002`-type false retake no longer groups, thumbnails show rotated clips upright.
+Delete `C:\Travel\work\Pakistan_2024\plan\thumbs\` first so old flipped thumbnails are not reused.

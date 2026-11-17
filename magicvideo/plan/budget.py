@@ -63,6 +63,10 @@ def select_event(ev: Event, moments: list[Moment], clips: dict[str, ClipData], p
     for m in moments:
         keep_reason = m.reason.startswith("dropped: silent") or m.reason.startswith("dropped: portrait")
         m.selected, m.reason = False, m.reason if keep_reason else ""
+        if m.orig_span is not None:  # undo a similar-shot trim from an earlier pass
+            m.t0, m.t1 = m.orig_span
+            m.abs_t0 = clips[m.clip_id].abs_start + m.t0
+            m.orig_span = None
 
     # 1. protected couple moments (a losing retake is not protected unless the owner keeps it)
     for m in moments:
@@ -70,6 +74,8 @@ def select_event(ev: Event, moments: list[Moment], clips: dict[str, ClipData], p
             rule = _override(m, overrides)
             if rule == "drop":
                 m.reason = "dropped in review"
+            elif m.reason.startswith("dropped: portrait") and rule not in ("keep", "couple"):
+                pass  # reframe.portrait_in_landscape: drop; the owner can keep it in review
             elif m.retake_of and rule not in ("keep", "couple"):
                 m.reason = f"retake: best take is {m.retake_of}"
             else:
@@ -122,10 +128,25 @@ def select_event(ev: Event, moments: list[Moment], clips: dict[str, ClipData], p
         if _override(m, overrides) == "drop":
             m.reason = "dropped in review"
     ceiling = ev.coverage_budget * (1.0 + float(policy("coverage.budget_overshoot_max")))
+    per_clip_max = int(policy("coverage.max_shots_per_clip"))
+    sim_thr = float(policy("coverage.similar_threshold"))
+    short_len = float(policy("coverage.similar_shot_s"))
+    per_clip: dict[str, int] = {}
+    for m in forced:
+        per_clip[m.clip_id] = per_clip.get(m.clip_id, 0) + 1
+
+    def projected(m: Moment) -> float:
+        """Length the shot would get: shortened when it repeats a clip or looks like a chosen shot."""
+        d = descs[m.id]
+        sim = max((float(d @ c) for c in chosen_desc), default=0.0) if d is not None else 0.0
+        return min(eff_len(m), short_len) if (per_clip.get(m.clip_id) or sim >= sim_thr) else eff_len(m)
+
     while pool and used < ev.coverage_budget:
         best, best_val = None, -1e9
         for m in pool:
-            if used + eff_len(m) > ceiling:
+            if per_clip.get(m.clip_id, 0) >= per_clip_max:
+                continue
+            if used + projected(m) > ceiling:
                 continue
             d = descs[m.id]
             sim = max((float(d @ c) for c in chosen_desc), default=0.0) if d is not None else 0.0
@@ -138,13 +159,26 @@ def select_event(ev: Event, moments: list[Moment], clips: dict[str, ClipData], p
             break
         pool.remove(best)
         best.selected, best.reason = True, "coverage"
+        length = projected(best)
+        if length < eff_len(best) - 1e-6:  # similar or same clip: keep the middle few seconds
+            best.orig_span = [best.t0, best.t1]
+            mid = best.t0 + eff_len(best) / 2
+            best.t0, best.t1 = mid - length / 2, mid + length / 2
+            best.max_len = None if best.max_len is None else min(best.max_len, length)
+            best.abs_t0 = clips[best.clip_id].abs_start + best.t0
+            best.reason = f"coverage (similar shot, {length:.0f}s)"
+        per_clip[best.clip_id] = per_clip.get(best.clip_id, 0) + 1
         used += eff_len(best)
         if descs[best.id] is not None:
             chosen_desc.append(descs[best.id])
     for m in pool:
         if not m.reason:
-            m.reason = "near-duplicate of a chosen shot" if descs[m.id] is not None and chosen_desc and \
-                max(float(descs[m.id] @ c) for c in chosen_desc) >= max_sim else "over event coverage budget"
+            if descs[m.id] is not None and chosen_desc and max(float(descs[m.id] @ c) for c in chosen_desc) >= max_sim:
+                m.reason = "near-duplicate of a chosen shot"
+            elif per_clip.get(m.clip_id, 0) >= per_clip_max:
+                m.reason = f"clip already has {per_clip_max} shots"
+            else:
+                m.reason = "over event coverage budget"
     ev.coverage_used = used
 
 
