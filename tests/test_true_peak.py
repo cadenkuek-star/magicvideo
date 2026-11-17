@@ -107,3 +107,21 @@ def test_encode_verified_check_off(rig):
     log = r._encode_verified(wav, None, out)
     assert encodes == [1] and spy == [] and out.exists()
     assert log["passes"] == 1 and log["note"] == "ok" and log["tp_first"] is None
+
+
+
+def test_dip_wav_leaves_no_open_handle_and_matches_whole_file_dips(rig):
+    """Region-wise dips equal dips on the whole signal, and the raw file is deleted (no lingering Windows lock)."""
+    import subprocess
+    from magicvideo import ffmpeg
+    r, wav, out, calls, mp = rig
+    with wave.open(str(wav), "rb") as w:
+        expect = np.frombuffer(w.readframes(w.getnframes()), "<i2").reshape(-1, 2).astype(np.float32) / 32768
+    times, dip, win = [0.5, 0.51, 1.5], 6.0, float(r.policy("audio.post_encode_dip_win_ms"))
+    r._dip_wav(wav, 48000, times, dip)
+    assert not wav.with_suffix(".f32").exists()
+    assert len(calls) == 2                                   # 0.5 and 0.51 overlap -> one region; 1.5 another
+    A.apply_dips(expect, 48000, times, dip, win)            # same dips on the whole signal at once
+    got = np.frombuffer(subprocess.run([ffmpeg.ffmpeg_bin(), "-v", "error", "-i", str(wav), "-f", "f32le", "-"],
+                                       capture_output=True).stdout, "<f4").reshape(-1, 2)
+    assert got.shape == expect.shape and np.max(np.abs(got - expect)) < 1e-6

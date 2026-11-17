@@ -238,15 +238,33 @@ class Renderer:
         return log
 
     def _dip_wav(self, wav: Path, sr: int, times: list[float], dip_db: float) -> None:
-        """Apply local gain dips to the wav through a memory map (never loads the whole file)."""
+        """Apply local gain dips to the wav, reading and writing only the short regions around each time.
+
+        No memory map: on Windows a live mapping (or any reference to it) locks the file, so it could not be
+        deleted afterwards (WinError 32). Plain reads/writes inside a `with` block release it deterministically.
+        """
         raw = wav.with_suffix(".f32")
         ffmpeg.run(["-y", "-v", "error", "-i", str(wav), "-f", "f32le", "-ac", "2", "-ar", str(sr), str(raw)])
-        n = raw.stat().st_size // 8
-        if n:
-            mm = np.memmap(raw, dtype=np.float32, mode="r+", shape=(n, 2))
-            A.apply_dips(mm, sr, times, dip_db, float(self.policy("audio.post_encode_dip_win_ms")))
-            mm.flush()
-            del mm
+        n = raw.stat().st_size // 8          # stereo float32 frames
+        win_ms = float(self.policy("audio.post_encode_dip_win_ms"))
+        half = int(round(win_ms / 1000.0 * sr / 2)) + 2
+        regions: list[list] = []             # [start, end, times] merged where windows overlap
+        for t in sorted(times):
+            a, b = max(0, int(round(t * sr)) - half), min(n, int(round(t * sr)) + half + 1)
+            if b <= a:
+                continue
+            if regions and a <= regions[-1][1]:
+                regions[-1][1] = max(regions[-1][1], b)
+                regions[-1][2].append(t)
+            else:
+                regions.append([a, b, [t]])
+        with open(raw, "r+b") as f:
+            for a, b, ts in regions:
+                f.seek(a * 8)
+                x = np.frombuffer(f.read((b - a) * 8), dtype="<f4").reshape(-1, 2).copy()
+                A.apply_dips(x, sr, [t - a / sr for t in ts], dip_db, win_ms)
+                f.seek(a * 8)
+                f.write(x.astype("<f4").tobytes())
         tmp = wav.with_name(wav.stem + "_d.wav")
         ffmpeg.run(["-y", "-v", "error", "-f", "f32le", "-ar", str(sr), "-ac", "2", "-i", str(raw),
                     "-c:a", "pcm_f32le", str(tmp)])

@@ -61,8 +61,8 @@ $env:PYTHONUTF8 = "1"
 pip install -e ".[dev]"
 pytest -q
 ```
-**CHECK:** `git log --oneline -1` shows `ff0ac3d` (or newer); pytest ends `137 passed, 1 skipped` (or more passed,
-0 failed). If tests fail: STOP, report the full tail. Do not edit code to make them pass.
+**CHECK:** `git log --oneline -1` shows the Windows file-lock fix (see the commit list) or newer; pytest ends with
+`0 failed` (139 tests; one may be skipped when the `anthropic` package is not installed). If tests fail: STOP, report the full tail. Do not edit code to make them pass.
 
 **3.2 Tool health**
 ```powershell
