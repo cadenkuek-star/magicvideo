@@ -1,0 +1,222 @@
+# magicvideo policy: every threshold lives here (see docs/IMPLEMENTATION_BRIEF.md).
+# `magicvideo init` copies this file into the trip folder; edit that copy.
+version: 3
+
+trip:
+  timezone: null                 # e.g. "Asia/Seoul"; used for creation_time (UTC) conversion
+
+compute:
+  device: auto                   # auto | cuda | cpu
+  asr_model: large-v3            # CPU fallback: consider "medium" for speed
+  asr_language: null             # e.g. yue for Cantonese; null = auto-detect. Re-run analyze --force --steps asr to apply
+  asr_compute_type: auto         # auto -> float16 on GPU, int8 on CPU
+
+cloud:                           # scene tagging only; nothing else ever leaves the machine
+  scene_tagging: true
+  provider: agent                # agent = the coding agent (Antigravity/Gemini) views frame grids on disk; anthropic = API key
+  model: null                    # null = claude-opus-5-5; set e.g. claude-haiku-5-5 to cut tagging cost
+  effort: low                    # tagging is simple classification
+  api_key_env: ANTHROPIC_API_KEY
+  max_frame_px: 512
+  frames_per_request: 9          # sent as one labelled 3x3 grid
+  frame_interval_s: 3.0
+
+asr_filter:
+  enabled: true
+  # whole-segment texts Whisper invents on silence/music; compared after removing spaces and punctuation, lowercase
+  phrases: ["ご視聴ありがとうございました", "ご視聴ありがとうございます", "thankyouforwatching",
+            "thanksforwatching", "pleasesubscribe", "subtitlesbytheamaraorgcommunity", "字幕由amaraorg社区提供",
+            "请不吝点赞订阅转发打赏支持明镜与点点栏目", "謝謝觀看", "谢谢观看", "感謝收看", "感谢收看"]
+  no_speech_prob_min: 0.6      # with avg_logprob_max: both must hold (only when the segment stores them)
+  avg_logprob_max: -1.0
+
+review:
+  port: 8765                      # `magicvideo review` listens on 127.0.0.1 only
+
+analysis:
+  steps: [quality, asr, voices, faces, orient, tags]
+
+orientation:                     # sideways / upside-down clips whose metadata is wrong
+  auto_detect: true              # uses the face backend on a few frames at 0/90/180/270 degrees
+  sample_frames: 6
+  frame_px: 640
+  min_faces: 2                   # detections the winning rotation needs
+  min_ratio: 1.5                 # its face score must beat the metadata orientation by this factor
+
+quality:
+  sample_fps: 10
+  proxy_px: 320
+  jitter_smooth_s: 0.5
+  jitter: {medium: 0.006, high: 0.015}   # fraction of frame diagonal; calibrate per camera
+  blur_min: 0.15                 # normalized sharpness (0..1)
+  white_fraction_max: 0.90       # share of near-white pixels that marks a whiteout
+  black_luma_max: 0.06           # mean luma (0..1) below this = black / lens covered
+  stabilize_max_zoom: 0.06
+
+identity:
+  unknown_speech_is_couple: true # without voice refs, treat speech as couple speech (safe default)
+  couple_prior: true            # couple trip: speech is the couple's unless a stranger is on screen
+  stranger_face:
+    max_similarity: 0.20        # face scores below this against BOTH partner refs = a stranger
+    min_q: 0.5                  # only clear faces count
+    pad_s: 1.0                  # look this far before/after a speech window
+  face:
+    backend: insightface         # insightface | yunet
+    sample_fps: 2
+    frame_px: 1280
+    min_similarity: 0.40
+    margin: 0.06
+    track_max_gap_s: 1.0
+    yunet_detector: null         # path to face_detection_yunet_2023mar.onnx (backend yunet)
+    sface_recognizer: null       # path to face_recognition_sface_2021dec.onnx (backend yunet)
+  voice:
+    backend: speechbrain
+    min_similarity: 0.55
+    margin: 0.05
+  silent_solo_shot_max_s: {PARTNER_A: 4.0, PARTNER_B: 4.0}   # 0 = drop
+
+voice:
+  window_gap_s: 0.5
+  window_max_s: 3.0
+  min_window_s: 0.8
+
+enrollment:
+  cluster_similarity: {face: 0.45, voice: 0.60}
+  max_candidates: 8
+  samples_per_candidate: {face: 12, voice: 8}
+  min_kept_per_partner: {face: 4, voice: 3}
+  page_port: 8766                # `magicvideo enroll <work> --page` listens on 127.0.0.1 only
+
+moments:
+  edge_speech: {start_s: 0.3, end_s: 1.5, camera_originals: false}   # warn if couple speech starts/ends this close to a clip edge; camera_originals: false = camera-named originals can't be trimmed too tight
+  conversation:
+    join_gap_s: 6.0
+    pre_roll_s: 1.5                # reaction kept before the first word
+    post_roll_s: 2.0               # and after the last word
+    keep_pause_up_to_s: 2.5
+    shorten_pause_to_s: 1.2
+    split_pause_over_s: 8.0
+    keep_other_speakers_inside: true
+  action:
+    tags: [taste, toast, cheers, reveal, game, dance, purchase]
+    partner_window_s: 2.0
+    pre_s: 2.0
+    post_s: 3.0
+
+coverage:
+  shot_min_s: 3.0
+  partner_shot_min_s: 2.0          # a shot with one of you on screen may be this short
+  partner_visible_bonus: 0.15      # score bonus for shots with a partner on screen
+  shot_max_s: 6.0
+  step_s: 1.5
+  margin_s: 0.5
+  mmr_lambda: 0.7
+  budget_overshoot_max: 0.15       # never exceed an event's coverage budget by more than this
+  max_shots_per_clip: 2            # B-roll shots taken from one source clip per event
+  similar_threshold: 0.80          # visually similar to a chosen shot (or same clip) ->
+  similar_shot_s: 3.0              #   keep only this many seconds (2-4 s), from the middle
+  max_similarity: 0.92
+
+retakes:                         # the same line recorded several times -> keep the best take
+  enabled: true
+  window_s: 600                  # takes must start within this many seconds of each other (same event)
+  text_similarity_min: 0.6       # transcript token similarity (0..1) that makes two takes the same
+  min_words: 3                   # with fewer words on both sides, compare the picture instead
+  visual_similarity_min: 0.95    # visual descriptor cosine for wordless takes (same partners on screen)
+  text_visual_min: 0.6           # takes matched by words must also look alike (cosine), when both have pictures
+
+third_party:
+  excerpt_max_s: 8.0
+  reaction_window_s: 3.0
+
+budgets_s:                       # [min, max] coverage seconds per event; couple moments never count here
+  meal: [20, 40]
+  landmark: [20, 45]
+  transit: [15, 40]
+  street: [15, 30]
+  hotel: [10, 25]
+  performance: [10, 25]
+  general: [15, 35]
+  third_party_per_event: 25
+
+film_limits:
+  transit_share_max: 0.10
+  third_party_share_max: 0.05
+  max_gap_without_partner_s: 90
+  target_runtime_min: null       # null = runtime comes from the footage
+
+events:
+  gap_min: 20
+
+assembly:
+  merge_gap_s: 0.5
+  cover_len_s: 2.0
+  defect_min_s: 0.5
+
+output:
+  orientation: auto              # auto | landscape | portrait
+  portrait_threshold: 0.60
+  fps: dominant_family           # dominant_family | 25 | 30 | 30000/1001
+  landscape_size: [1920, 1080]
+  portrait_size: [1080, 1920]
+  chapters: true
+  video: {codec: libx264, crf: 18, preset: slow, profile: high}
+
+reframe:
+  portrait_in_landscape: auto    # auto (crop when large enough, else still blurred background) | static_bg | crop | drop
+                                 # drop = every portrait clip is left out of a landscape film (keep in review rescues one)
+  min_crop_short_side: 1600
+  bg_blur_sigma: 30
+  bg_brightness: -0.18
+
+render:
+  workers: auto                  # parallel piece renders; auto = min(4, cpus/2)
+  intermediate_crf: 12
+  audio_fade_ms: 8
+  keep_intermediates: false
+
+audio:
+  sample_rate: 48000
+  integrated_lufs: -16.0
+  integrated_tolerance: 1.0
+  true_peak_dbtp: -1.5
+  aac_bitrate: 192k
+  dialogue_match_max_db: 3.0
+  post_encode_check: true         # measure true peak on the encoded master; repair overshoots locally
+  post_encode_max_passes: 3
+  post_encode_margin_db: 0.3      # aim this far below true_peak_dbtp
+  post_encode_dip_win_ms: 40      # width of each local gain dip
+  post_encode_global_max_db: 0.8  # if no overshoot spot can be found, lower everything by at most this
+
+color:
+  luts: {}                       # e.g. {"d-log-m": "C:/Travel/luts/DJI_DLogM_to_Rec709.cube"}
+
+insta360:
+  stitcher: auto                 # auto | studio_export | media_sdk
+  plan_unstitched: true          # plan unstitched .insv from its .lrv preview; export only the selected clips before render
+  allow_unstitched_render: false # render .insv dual fisheye directly (visible seams)
+  fisheye_fov_deg: 200           # per-lens FOV for dual-fisheye conversion; verify on an X6 sample
+  analysis_views: 6
+  analysis_view_fov_deg: 100
+  min_hfov_deg: {below_8k: 90, at_least_8k: 80}
+  max_yaw_speed_dps: 30
+  min_shot_hold_s: 2.5
+  both_partners_max_spread_deg: 110
+  pitch_limit_deg: 25
+
+qc:
+  fold_chinese_script: true       # compare Simplified and Traditional as the same (needs zhconv)
+  signal_check: true              # decide speech.partner_words_rendered by comparing master audio with the source
+  signal_sr: 16000
+  signal_min_corr: 0.6            # normalised correlation (best lag) for a word to count as present
+  signal_max_lag_s: 0.05
+  signal_min_level_db: -12.0      # master word level relative to the source word level, after known gains
+  rendered_signal_match_min: 0.98 # pass line for the signal method
+  asr_crosscheck: true            # still run the Whisper comparison when available, as information
+  speech_span_merge_gap_s: 2.0     # QC transcribes the master in spans of one language; merge spans closer than this
+  speech_missing_run_min: 3        # report runs of at least this many unheard planned tokens
+  couple_word_retention_min: 0.98   # planned: partner words kept in the timeline
+  rendered_word_match_min: 0.90     # independent re-transcription of the master (ASR noise allowed)
+  unhidden_conversation_jump_cuts_max: 0
+  av_drift_ms_max: 21
+  event_over_budget_max: 0.20

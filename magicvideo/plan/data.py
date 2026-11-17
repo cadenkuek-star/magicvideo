@@ -1,0 +1,232 @@
+"""Load per-clip analysis into planner-friendly objects (no model inference happens here)."""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import bisect
+import unicodedata
+
+import numpy as np
+
+from ..analysis.faces import label_faces, stranger_times
+from ..analysis.quality import QualityTrack
+from ..analysis.voices import (COUPLE, OTHER, PARTNER_A, PARTNER_B, UNKNOWN, build_windows, label_windows,
+                               window_best_scores)
+from ..policy import Policy
+from ..util import read_json
+from .model import Turn, abs_seconds
+
+PARTNERS = (PARTNER_A, PARTNER_B)
+
+
+@dataclass
+class ClipData:
+    clip: dict
+    words: list[dict] = field(default_factory=list)
+    turns: list[Turn] = field(default_factory=list)
+    face_dets: list[dict] = field(default_factory=list)
+    face_labels: list[str | None] = field(default_factory=list)
+    face_fps: float = 2.0
+    quality: QualityTrack = field(default_factory=lambda: QualityTrack({}))
+    tags: list[dict] = field(default_factory=list)
+    asr_done: bool = False
+    window_evidence: list[dict] = field(default_factory=list)
+    dropped_speech: list[dict] = field(default_factory=list)
+    auto_rotate: int = 0        # content-detected extra rotation (orient.json); overrides win
+
+    @property
+    def id(self) -> str:
+        return self.clip["clip_id"]
+
+    @property
+    def duration(self) -> float:
+        return float(self.clip["duration"])
+
+    @property
+    def abs_start(self) -> float:
+        return abs_seconds(self.clip["capture_start"])
+
+    @property
+    def is360(self) -> bool:
+        return self.clip.get("render_projection", self.clip.get("projection")) in ("equirect", "dual_fisheye")
+
+    # ---- speech ------------------------------------------------------------
+    def words_in(self, t0: float, t1: float) -> list[int]:
+        return [i for i, w in enumerate(self.words) if w["t1"] > t0 and w["t0"] < t1]
+
+    def speech_in(self, t0: float, t1: float) -> bool:
+        return bool(self.words_in(t0, t1))
+
+    def word_speaker(self, i: int) -> str:
+        for t in self.turns:
+            if t.w0 <= i < t.w1:
+                return t.speaker
+        return UNKNOWN
+
+    # ---- faces -------------------------------------------------------------
+    def partners_visible(self, t0: float, t1: float, min_share: float = 0.3) -> list[str]:
+        if not self.face_dets:
+            return []
+        n_samples = max(1, int(round((t1 - t0) * self.face_fps)))
+        out = []
+        for p in PARTNERS:
+            ts = {round(d["t"], 3) for d, lab in zip(self.face_dets, self.face_labels)
+                  if lab == p and t0 <= d["t"] < t1}
+            if len(ts) / n_samples >= min_share:
+                out.append(p)
+        return out
+
+    def partner_yaws(self, t0: float, t1: float) -> dict[str, list[float]]:
+        out: dict[str, list[float]] = {}
+        for d, lab in zip(self.face_dets, self.face_labels):
+            if lab in PARTNERS and t0 <= d["t"] < t1 and "yaw" in d:
+                out.setdefault(lab, []).append(float(d["yaw"]))
+        return out
+
+    def face_center(self, t0: float, t1: float) -> tuple[float, float] | None:
+        """Mean centre of faces (partners preferred) in normalised flat-frame coordinates."""
+        pts = [(d["box"][0] + d["box"][2] / 2, d["box"][1] + d["box"][3] / 2, lab)
+               for d, lab in zip(self.face_dets, self.face_labels) if t0 <= d["t"] < t1 and "yaw" not in d]
+        if not pts:
+            return None
+        part = [p for p in pts if p[2] in PARTNERS] or pts
+        return float(np.mean([p[0] for p in part])), float(np.mean([p[1] for p in part]))
+
+    # ---- tags --------------------------------------------------------------
+    def tags_in(self, t0: float, t1: float, pad: float = 1.5) -> list[dict]:
+        return [f for f in self.tags if t0 - pad <= f["t"] < t1 + pad]
+
+
+def build_turns(words: list[dict], windows: list[dict], labels: list[str], max_gap: float) -> list[Turn]:
+    word_label = [UNKNOWN] * len(words)
+    for w, lab in zip(windows, labels):
+        for i in range(w["w0"], min(w["w1"], len(words))):
+            word_label[i] = lab
+    turns: list[Turn] = []
+    for i, w in enumerate(words):
+        lab = word_label[i]
+        if turns and turns[-1].speaker == lab and w["t0"] - words[i - 1]["t1"] <= max_gap:
+            turns[-1].t1 = w["t1"]
+            turns[-1].w1 = i + 1
+        else:
+            turns.append(Turn(w["t0"], w["t1"], lab, i, i + 1))
+    return turns
+
+
+def _norm_phrase(text: str) -> str:
+    return "".join(c for c in text.lower() if not c.isspace() and unicodedata.category(c)[0] not in "PS")
+
+
+def drop_hallucinations(words: list[dict], segments: list[dict], windows: list[dict], emb: np.ndarray,
+                        policy: Policy) -> tuple[list[dict], list[dict], np.ndarray, list[dict]]:
+    """Remove words of segments Whisper most likely invented (known phrases, or both scores bad)."""
+    if not policy("asr_filter.enabled") or not segments or not words:
+        return words, windows, emb, []
+    phrases = {_norm_phrase(p) for p in policy("asr_filter.phrases")}
+    ns_min = float(policy("asr_filter.no_speech_prob_min"))
+    lp_max = float(policy("asr_filter.avg_logprob_max"))
+    bad: list[int] = []
+    for k, seg in enumerate(segments):
+        hall = _norm_phrase(seg.get("text", "")) in phrases
+        if not hall and "no_speech_prob" in seg and "avg_logprob" in seg:
+            hall = float(seg["no_speech_prob"]) >= ns_min and float(seg["avg_logprob"]) <= lp_max
+        if hall:
+            bad.append(k)
+    if not bad:
+        return words, windows, emb, []
+    owner: list[int | None] = []
+    for w in words:
+        owner.append(next((k for k, s in enumerate(segments) if s["t0"] - 0.01 <= w["t0"] < s["t1"] + 0.01), None))
+    drop = [o is not None and o in bad for o in owner]
+    new_index: list[int] = []
+    n = 0
+    for d in drop:
+        new_index.append(n)
+        if not d:
+            n += 1
+    new_index.append(n)
+    kept_words = [w for w, d in zip(words, drop) if not d]
+    new_windows, rows = [], []
+    for i, win in enumerate(windows):
+        a, b = win["w0"], min(win["w1"], len(words))
+        if not any(not drop[j] for j in range(a, b)):
+            continue
+        new_windows.append({**win, "w0": new_index[a], "w1": new_index[a] + sum(1 for j in range(a, b) if not drop[j])})
+        rows.append(i)
+    new_emb = emb[rows] if len(emb) == len(windows) else emb
+    dropped = [{"t0": segments[k]["t0"], "t1": segments[k]["t1"], "text": segments[k].get("text", "").strip()}
+               for k in bad]
+    return kept_words, new_windows, new_emb, dropped
+
+
+def load_clip(project, clip: dict, refs: dict | None, policy: Policy) -> ClipData:
+    adir: Path = project.analysis_dir(clip["clip_id"])
+    status = project.step_status(clip["clip_id"])
+    cd = ClipData(clip=clip)
+    tr = read_json(adir / "transcript.json")
+    if tr is not None:
+        cd.words = tr.get("words", [])
+        cd.asr_done = status.get("asr") in ("done",) or status.get("asr", "").startswith("skipped:no audio")
+    vj = read_json(adir / "voices.json")
+    if vj is not None and (adir / "voice_emb.npy").exists():
+        windows = vj["windows"]
+        emb = np.load(adir / "voice_emb.npy")
+    else:
+        windows = build_windows(cd.words, float(policy("voice.window_gap_s")), float(policy("voice.window_max_s")))
+        emb = np.zeros((0, 192), np.float32)
+    cd.words, windows, emb, cd.dropped_speech = drop_hallucinations(
+        cd.words, (tr or {}).get("segments", []), windows, emb, policy)
+    fj = read_json(adir / "faces.json")
+    face_emb = None
+    if fj is not None and (adir / "face_emb.npy").exists():
+        cd.face_dets = fj["dets"]
+        cd.face_fps = float(fj.get("sample_fps") or 2.0)
+        face_emb = np.load(adir / "face_emb.npy")
+        cd.face_labels = label_faces(cd.face_dets, face_emb, refs, policy)
+    matched = len(emb) == len(windows)
+    raw = label_windows(emb, windows, refs, policy) if matched else [UNKNOWN] * len(windows)
+    stranger_ts = stranger_times(cd.face_dets, face_emb, refs, policy) if face_emb is not None else []
+    labels = apply_couple_prior(windows, raw, stranger_ts, policy)
+    best = window_best_scores(emb, refs) if matched else np.zeros(len(windows), np.float32)
+    pad = float(policy("identity.stranger_face.pad_s"))
+    has_voice = bool(refs) and refs.get("voice_a") is not None and refs.get("voice_b") is not None
+    cd.window_evidence = [{"t0": round(float(w["t0"]), 3), "t1": round(float(w["t1"]), 3), "raw": r, "label": lab,
+                           "voice_best": round(float(v), 3) if has_voice else None, "stranger": _stranger_near(w, stranger_ts, pad)}
+                          for w, r, lab, v in zip(windows, raw, labels, best)]
+    cd.turns = build_turns(cd.words, windows, labels, float(policy("moments.conversation.join_gap_s")))
+    qj = read_json(adir / "quality.json")
+    if qj is not None:
+        desc = np.load(adir / "visual_desc.npy") if (adir / "visual_desc.npy").exists() else None
+        cd.quality = QualityTrack(qj, desc)
+    tj = read_json(adir / "tags.json")
+    if tj is not None:
+        cd.tags = tj.get("frames", [])
+    oj = read_json(adir / "orient.json")
+    if oj is not None and policy("orientation.auto_detect"):
+        cd.auto_rotate = int(oj.get("rotate", 0)) % 360
+    return cd
+
+
+def _stranger_near(w: dict, stranger_ts: list[float], pad: float) -> bool:
+    """True when some stranger time t satisfies w.t0 - pad <= t <= w.t1 + pad (stranger_ts sorted ascending)."""
+    i = bisect.bisect_left(stranger_ts, w["t0"] - pad)
+    return i < len(stranger_ts) and stranger_ts[i] <= w["t1"] + pad
+
+
+def apply_couple_prior(windows: list[dict], labels: list[str], stranger_ts: list[float], policy: Policy) -> list[str]:
+    """Unmatched speech (OTHER) becomes COUPLE unless a stranger's face is on screen near the window."""
+    if not policy("identity.couple_prior"):
+        return labels
+    pad = float(policy("identity.stranger_face.pad_s"))
+    ts = sorted(stranger_ts)
+    return [COUPLE if lab == OTHER and not _stranger_near(w, ts, pad) else lab for w, lab in zip(windows, labels)]
+
+
+def is_couple_speaker(speaker: str, policy: Policy) -> bool:
+    if speaker in PARTNERS or speaker == COUPLE:
+        return True
+    return speaker == UNKNOWN and bool(policy("identity.unknown_speech_is_couple"))
+
+
+__all__ = ["ClipData", "build_turns", "load_clip", "is_couple_speaker", "apply_couple_prior", "PARTNERS", "OTHER", "UNKNOWN"]
