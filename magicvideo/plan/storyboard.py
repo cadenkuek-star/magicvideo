@@ -31,8 +31,23 @@ body{padding-bottom:64px}.btns button.on{background:var(--ink);color:var(--bg);b
 .meta{color:var(--muted);font-size:12px}.text{font-size:12px;margin-top:4px;max-height:5.6em;overflow:hidden}
 .btns{display:flex;gap:6px;margin-top:6px}button{flex:1;border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:5px;padding:3px 0;cursor:pointer}
 button.k{color:var(--keep)}button.d{color:var(--drop)}code{font-size:11px;word-break:break-all;color:var(--muted)}
+:root{--couple:#d6336c;--broll:#1c7ed6;--transit:#0c8599;--third:#e8590c;--similar:#e0a800;--retake:#c92a2a;--best:#b8860b}
+.card{position:relative;border-left:6px solid var(--line)}
+.card.c-couple{border-left-color:var(--couple)}.card.c-coverage{border-left-color:var(--broll)}
+.card.c-transit{border-left-color:var(--transit)}.card.c-third_party{border-left-color:var(--third)}
+.pill{position:absolute;top:6px;left:6px;font:700 11px/1 system-ui;letter-spacing:.04em;padding:4px 7px;border-radius:4px;color:#fff;z-index:1}
+.c-couple .pill{background:var(--couple)}.c-coverage .pill{background:var(--broll)}.c-transit .pill{background:var(--transit)}.c-third_party .pill{background:var(--third)}
+.state{position:absolute;top:6px;right:6px;font:700 11px/1 system-ui;padding:4px 7px;border-radius:4px;z-index:1;background:#fff;color:#000}
+.s-in .state{background:#2b8a3e;color:#fff}.s-out .state{background:#495057;color:#fff}
+.s-similar .state{background:var(--similar);color:#000}.s-retake .state{background:var(--retake);color:#fff}
+.s-best .state{background:var(--best);color:#fff}.s-dropped .state,.ov-drop .state{background:#212529;color:#fff}
+.card.off img{filter:grayscale(1) brightness(.75)}.card.off{opacity:.6}
+.card.ov-drop{opacity:.45}.card.ov-keep{outline:3px solid #2b8a3e;opacity:1}.card.ov-keep img{filter:none}
+.legend{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 0}.legend button{flex:none;padding:3px 10px;border-radius:12px;font-size:12px}
+.legend button.on{background:var(--ink);color:var(--bg)}.legend .sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
 .badges{margin:4px 0 0;display:flex;gap:4px;flex-wrap:wrap}.badge{font-size:11px;padding:1px 6px;border-radius:9px;border:1px solid var(--line);color:var(--muted)}
 .badge.best{color:var(--keep);border-color:var(--keep)}.badge.retake{color:var(--drop);border-color:var(--drop)}.badge.flag{color:#9a6b00;border-color:#9a6b00}
+body[data-f='in'] .card:not(.in){display:none}body[data-f='c-couple'] .card:not(.c-couple){display:none}body[data-f='c-coverage'] .card:not(.c-coverage){display:none}body[data-f='c-transit'] .card:not(.c-transit){display:none}body[data-f='c-third_party'] .card:not(.c-third_party){display:none}body[data-f='s-similar'] .card:not(.s-similar){display:none}body[data-f='s-retake'] .card:not(.s-retake){display:none}body[data-f='off'] .card:not(.off){display:none}
 """
 
 JS = r"""
@@ -40,7 +55,7 @@ JS = r"""
 var live=false,changes=0,PICKS={};
 function cur(id){var m=(window.OVERRIDES&&window.OVERRIDES.moments)||{};var v=PICKS.hasOwnProperty(id)?PICKS[id]:m[id];return typeof v==='string'?v:null;}
 function paint(){document.querySelectorAll('.card').forEach(function(c){var v=cur(c.dataset.id);
-c.querySelectorAll('.btns button').forEach(function(b){b.classList.toggle('on',b.dataset.v===v||(b.dataset.v==='clear'&&!v));});});}
+c.querySelectorAll('.btns button').forEach(function(b){b.classList.toggle('on',b.dataset.v===v||(b.dataset.v==='clear'&&!v));});c.classList.toggle('ov-keep',v==='keep'||v==='couple');c.classList.toggle('ov-drop',v==='drop');var st=c.querySelector('.state');if(st){if(!st.dataset.orig)st.dataset.orig=st.textContent;st.textContent=v==='drop'?'DROPPED BY YOU':(v==='keep'||v==='couple')?'KEPT BY YOU':st.dataset.orig;}});}
 function scalar(v){return JSON.stringify(v);}
 function emit(o,ind){var pad=new Array(ind+1).join(' '),ks=Object.keys(o).sort(),out=[];
 if(!ks.length)return null;
@@ -67,7 +82,7 @@ if(live){fetch('/api/moment',{method:'POST',headers:{'Content-Type':'application
 .then(function(x){if(!x.ok)throw new Error(x.j.error||'rejected');window.OVERRIDES=x.j.overrides;PICKS={};changes++;paint();bar();})
 .catch(function(e){document.getElementById('bar').textContent='Could not save: '+e.message;});}
 else{PICKS[id]=v;paint();}}
-document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('.btns button');if(!b)return;
+document.addEventListener('click',function(e){var f=e.target.closest&&e.target.closest('.legend button');if(f){document.body.dataset.f=f.dataset.f;document.querySelectorAll('.legend button').forEach(function(x){x.classList.toggle('on',x===f);});return;}var b=e.target.closest&&e.target.closest('.btns button');if(!b)return;
 var c=b.closest('.card');if(c)choose(c.dataset.id,b.dataset.v);});
 window.addEventListener('DOMContentLoaded',function(){paint();bar();
 fetch('/api/overrides').then(function(r){if(!r.ok)throw 0;return r.json();}).then(function(j){
@@ -120,6 +135,33 @@ def _identity_line(project, ident: dict) -> str:
     return " \u00b7 ".join(parts)
 
 
+LEGEND = [('all', 'All', None), ('in', 'In the film', '#2b8a3e'), ('c-couple', 'You two', 'var(--couple)'), ('c-coverage', 'B-roll', 'var(--broll)'), ('c-transit', 'Transit', 'var(--transit)'), ('c-third_party', 'Other people', 'var(--third)'), ('s-similar', 'Similar (shortened)', 'var(--similar)'), ('s-retake', 'Retakes', 'var(--retake)'), ('off', 'Left out', '#495057')]
+
+CLASS_LABEL = {"couple": "YOU TWO", "coverage": "B-ROLL", "transit": "TRANSIT", "third_party": "OTHER PEOPLE"}
+
+
+def card_state(m: dict) -> tuple[list[str], str]:
+    """CSS classes and the state label shown on a storyboard card."""
+    classes = [f"c-{m['cls'] or 'coverage'}"]
+    reason = m.get("reason", "")
+    if m.get("retake_of"):
+        classes += ["s-retake", "off"]
+        return classes, "RETAKE · LEFT OUT"
+    if reason == "dropped in review":
+        return classes + ["s-dropped", "off"], "DROPPED BY YOU"
+    if not m["selected"]:
+        label = "CUTAWAY" if "cutaway" in reason else "LEFT OUT"
+        return classes + (["s-in", "in"] if label == "CUTAWAY" else ["s-out", "off"]), label
+    classes.append("in")
+    if m.get("retake_group"):
+        return classes + ["s-best"], "★ BEST TAKE"
+    if reason.startswith("coverage (similar shot"):
+        return classes + ["s-similar"], f"SIMILAR · {m['dur']:.0f}s"
+    if "kept in review" in reason:
+        return classes + ["s-in"], "KEPT BY YOU"
+    return classes + ["s-in"], "IN FILM"
+
+
 def _js_json(obj) -> str:
     """JSON that is safe inside an HTML <script> element."""
     return json.dumps(obj, sort_keys=True, ensure_ascii=False).replace("</", "<\\/").replace("<!--", "<\\!--")
@@ -144,7 +186,11 @@ def write_storyboard(project, plan: dict, timeline: dict, path: Path, thumbs: bo
                if st.get("retake_groups") else "")
             + "".join(f" · {html.escape(k)}: {v}" for k, v in (st.get("flagged") or {}).items()) + "</div>"
             + "".join(f"<div class=warn>⚠ {html.escape(w)}</div>" for w in plan["warnings"])
-            + f"<div id=stale class=stale hidden>{html.escape(STALE_REFS_TEXT)}</div>")
+            + f"<div id=stale class=stale hidden>{html.escape(STALE_REFS_TEXT)}</div>"
+            + "<div class=legend>" + "".join(
+                f"<button data-f='{k}'{' class=on' if k == 'all' else ''}>"
+                + (f"<span class=sw style='background:{c}'></span>" if c else "") + f"{lbl}</button>"
+                for k, lbl, c in LEGEND) + "</div>")
     body = []
     by_event: dict[str, list[dict]] = {}
     for m in plan["moments"]:
@@ -169,10 +215,13 @@ def write_storyboard(project, plan: dict, timeline: dict, path: Path, thumbs: bo
                                   if not m.get("retake_of") else
                                   f"<span class='badge retake'>retake {html.escape(m['retake_group'])}</span>")
                 badges += [f"<span class='badge flag'>{html.escape(f)}</span>" for f in m.get("flags", [])]
+                classes, state = card_state(m)
                 body.append(
-                    f"<div class='card{'' if m['selected'] else ' off'}' data-id=\"{mid}\">"
-                    + (f"<img src='thumbs/{html.escape(img)}' loading=lazy>" if img else "")
-                    + f"<div class=body><div class=kind>{m['kind']} · {m['cls']}</div>"
+                    f"<div class='card {' '.join(classes)}' data-id=\"{mid}\">"
+                    f"<span class=pill>{CLASS_LABEL.get(m['cls'], m['cls'].upper())}</span>"
+                    f"<span class=state>{html.escape(state)}</span>"
+                    + (f"<img src='thumbs/{html.escape(img)}' loading=lazy>" if img else "<div style='height:30px'></div>")
+                    + f"<div class=body><div class=kind>{m['kind']}</div>"
                     f"<div class=meta>{html.escape(clip.get('rel_path', m['clip_id']))} · "
                     f"{m['t0']:.1f}–{m['t1']:.1f}s ({m['dur']:.1f}s)</div>"
                     f"<div class=meta>{html.escape(m['reason'])}</div>"
